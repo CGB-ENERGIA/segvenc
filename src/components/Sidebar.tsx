@@ -79,37 +79,39 @@ useEffect(() => {
         transition: 'width 0.2s ease', overflow: 'hidden',
       }}>
 
-        {/* LOGO + TOGGLE */}
-        <div style={{
-          padding: recolhida ? '18px 0' : '18px 16px 18px 20px',
-          borderBottom: '1px solid #f0f0f0',
-          display: 'flex', alignItems: 'center',
-          justifyContent: recolhida ? 'center' : 'space-between',
-          gap: 8,
-        }}>
-          {!recolhida && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, overflow: 'hidden' }}>
-              <img src="/logo-cgb.png" alt="CGB" style={{ height: 26, flexShrink: 0 }} />
-              <span style={{ fontSize: 13, fontWeight: 600, color: '#4a4a49', whiteSpace: 'nowrap' }}>SegVenc</span>
-            </div>
-          )}
+       {/* LOGO + TOGGLE */}
+<div style={{
+  padding: '18px 0',
+  borderBottom: '1px solid #f0f0f0',
+  display: 'flex',
+  flexDirection: recolhida ? 'column' : 'row',
+  alignItems: 'center',
+  justifyContent: 'center',
+  gap: 8,
+}}>
+  {!recolhida && (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 1, paddingLeft: 20, overflow: 'hidden' }}>
+      <img src="/logo-cgb.png" alt="CGB" style={{ height: 26, flexShrink: 0 }} />
+      <span style={{ fontSize: 13, fontWeight: 600, color: '#4a4a49', whiteSpace: 'nowrap' }}>SegVenc</span>
+    </div>
+  )}
 
-        {recolhida && (
-  <img src="/logo-cgb.png" alt="CGB" style={{ height: 28 }} />
+  {recolhida && (
+  <img src="/icon-cgb.png" alt="CGB" style={{ height: 28 }} />
 )}
-          <button
-            onClick={toggleSidebar}
-            title={recolhida ? 'Expandir menu' : 'Recolher menu'}
-            style={{
-              background: 'none', border: '1px solid #e0e0e0', borderRadius: 6,
-              width: 24, height: 24, display: 'flex', alignItems: 'center', justifyContent: 'center',
-              cursor: 'pointer', color: '#888', fontSize: 12, flexShrink: 0,
-              ...(recolhida ? { marginTop: 8 } : {}),
-            }}
-          >
-            {recolhida ? '›' : '‹'}
-          </button>
-        </div>
+  <button
+    onClick={toggleSidebar}
+    title={recolhida ? 'Expandir menu' : 'Recolher menu'}
+    style={{
+      background: 'none', border: '1px solid #e0e0e0', borderRadius: 6,
+      width: 24, height: 24, display: 'flex', alignItems: 'center', justifyContent: 'center',
+      cursor: 'pointer', color: '#888', fontSize: 12, flexShrink: 0,
+      marginRight: recolhida ? 0 : 16,
+    }}
+  >
+    {recolhida ? '›' : '‹'}
+  </button>
+</div>
 
         {/* MENU */}
         <nav style={{ flex: 1, padding: '10px 0', overflowY: 'auto' }}>

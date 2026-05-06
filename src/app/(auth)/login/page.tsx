@@ -66,25 +66,25 @@ export default function LoginPage() {
         boxShadow: '0 4px 24px rgba(0,0,0,0.08)',
       }}>
 
-        {/* LOGO */}
-        <div style={{ textAlign: 'center', marginBottom: 36 }}>
-          <Image
-            src="/logo-cgb.png"
-            alt="CGB"
-            width={180}
-            height={60}
-            style={{ objectFit: 'contain' }}
-            priority
-          />
-        </div>
+      {/* LOGO */}
+<div style={{ display: 'flex', justifyContent: 'center', marginBottom: 36 }}>
+  <Image
+    src="/logo-cgb.png"
+    alt="CGB"
+    width={180}
+    height={60}
+    style={{ objectFit: 'contain' }}
+    priority
+  />
+</div>
 
-        {/* TÍTULO */}
-        <h1 style={{ fontSize: 20, fontWeight: 500, color: '#1a1a1a', marginBottom: 4 }}>
-          Bem-vindo de volta
-        </h1>
-        <p style={{ fontSize: 13, color: '#888', marginBottom: 28 }}>
-          Acesse com seu e-mail corporativo
-        </p>
+      {/* TÍTULO */}
+<h1 style={{ fontSize: 20, fontWeight: 500, color: '#1a1a1a', marginBottom: 4, textAlign: 'center' }}>
+  Bem-vindo ao SEGVENC
+</h1>
+<p style={{ fontSize: 13, color: '#888', marginBottom: 28, textAlign: 'center' }}>
+  Acesse com seu e-mail corporativo
+</p>
 
         {/* FORMULÁRIO */}
         <form onSubmit={handleLogin}>
