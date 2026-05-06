@@ -85,6 +85,125 @@ function calcularStats(colaboradores: Colaborador[]) {
   return { examesValidos, proximosVencimento, vencidos }
 }
 
+function getStatusLabel(status: string) {
+  if (status === 'valido') return 'Válido'
+  if (status === 'proximo') return 'A vencer'
+  return 'Vencido'
+}
+
+// ─── EXPORTAÇÃO ──────────────────────────────────────────────────────────────
+
+function gerarDadosExportacao(colaboradores: Colaborador[], treinamentos: Treinamento[]) {
+  return colaboradores.map(c => {
+    const linha: Record<string, string> = {
+      'Matrícula': c.matricula,
+      'Nome': c.nome,
+      'Função': c.funcoes?.nome || '',
+      'Situação': c.situacao,
+      'Base': c.bases?.nome || '',
+      'Admissão': c.data_admissao ? new Date(c.data_admissao + 'T12:00:00').toLocaleDateString('pt-BR') : '',
+    }
+    treinamentos.forEach(t => {
+      const reg = c.registros_exames?.find(r => r.regra_id === t.id)
+      if (reg) {
+        const status = getStatusVencimento(reg.data_vencimento)
+        const ultimaAud = [...(reg.logs_auditoria || [])].sort((a, b) => new Date(b.data_auditoria).getTime() - new Date(a.data_auditoria).getTime())[0]
+        linha[`${t.nome} - Vencimento`] = new Date(reg.data_vencimento + 'T12:00:00').toLocaleDateString('pt-BR')
+        linha[`${t.nome} - Status`] = getStatusLabel(status)
+        linha[`${t.nome} - Documento`] = reg.url_arquivo ? 'Com documento' : 'Sem documento'
+        linha[`${t.nome} - Auditoria`] = !ultimaAud ? 'Pendente' : ultimaAud.validado ? 'Validado' : 'Reprovado'
+      } else {
+        linha[`${t.nome} - Vencimento`] = ''
+        linha[`${t.nome} - Status`] = 'Sem registro'
+        linha[`${t.nome} - Documento`] = ''
+        linha[`${t.nome} - Auditoria`] = ''
+      }
+    })
+    return linha
+  })
+}
+
+function exportarCSV(dados: Record<string, string>[]) {
+  if (dados.length === 0) return
+  const cabecalhos = Object.keys(dados[0])
+  const linhas = dados.map(row => cabecalhos.map(h => `"${(row[h] || '').replace(/"/g, '""')}"`).join(';'))
+  const csv = [cabecalhos.map(h => `"${h}"`).join(';'), ...linhas].join('\n')
+  const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `painel-operacional-${new Date().toLocaleDateString('pt-BR').replace(/\//g, '-')}.csv`
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
+function exportarXLSX(dados: Record<string, string>[]) {
+  if (dados.length === 0) return
+  import('xlsx').then(XLSX => {
+    const ws = XLSX.utils.json_to_sheet(dados)
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, 'Painel Operacional')
+    XLSX.writeFile(wb, `painel-operacional-${new Date().toLocaleDateString('pt-BR').replace(/\//g, '-')}.xlsx`)
+  })
+}
+
+
+// ─── BOTÃO EXPORTAR ───────────────────────────────────────────────────────────
+
+function BotaoExportar({ onClick }: { onClick: (tipo: 'csv' | 'xlsx') => void }) {
+  const [aberto, setAberto] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const h = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setAberto(false) }
+    document.addEventListener('mousedown', h); return () => document.removeEventListener('mousedown', h)
+  }, [])
+
+  return (
+    <div ref={ref} style={{ position: 'relative' }}>
+      <button onClick={() => setAberto(!aberto)} style={{
+        height: 36, padding: '0 10px', fontSize: 12,
+        border: '1px solid #e0e0e0', borderRadius: 8,
+        backgroundColor: 'white', color: '#555', cursor: 'pointer',
+        display: 'flex', alignItems: 'center', gap: 4,
+      }}>
+        <svg width={18} height={18} viewBox="0 0 24 24" fill="none" stroke="#16a34a" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
+          <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8zM14 2v6h6M8 13h2m4 0h2M8 17h2m4 0h2M10 13v4" />
+        </svg>
+        <span style={{ fontSize: 10 }}>{aberto ? '▲' : '▼'}</span>
+      </button>
+      {aberto && (
+        <div style={{
+          position: 'absolute', top: 40, right: 0, zIndex: 50,
+          backgroundColor: 'white', border: '1px solid #e0e0e0',
+          borderRadius: 10, boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
+          width: 180, overflow: 'hidden',
+        }}>
+          <button onClick={() => { onClick('csv'); setAberto(false) }} style={{
+            width: '100%', padding: '10px 16px', fontSize: 13, textAlign: 'left',
+            border: 'none', background: 'none', cursor: 'pointer', color: '#333',
+            display: 'flex', alignItems: 'center', gap: 10,
+          }}
+            onMouseEnter={e => e.currentTarget.style.backgroundColor = '#f9f9f9'}
+            onMouseLeave={e => e.currentTarget.style.backgroundColor = 'transparent'}>
+            📄 Exportar CSV
+          </button>
+          <div style={{ height: 1, backgroundColor: '#f0f0f0' }} />
+          <button onClick={() => { onClick('xlsx'); setAberto(false) }} style={{
+            width: '100%', padding: '10px 16px', fontSize: 13, textAlign: 'left',
+            border: 'none', background: 'none', cursor: 'pointer', color: '#333',
+            display: 'flex', alignItems: 'center', gap: 10,
+          }}
+            onMouseEnter={e => e.currentTarget.style.backgroundColor = '#f9f9f9'}
+            onMouseLeave={e => e.currentTarget.style.backgroundColor = 'transparent'}>
+            📊 Exportar Excel
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ─── ÍCONE SVG ───────────────────────────────────────────────────────────────
 
 function Icone({ tipo, cor, titulo, size = 16 }: { tipo: string; cor: string; titulo?: string; size?: number }) {
@@ -110,11 +229,8 @@ function Icone({ tipo, cor, titulo, size = 16 }: { tipo: string; cor: string; ti
 // ─── MODAL NOVO EXAME ─────────────────────────────────────────────────────────
 
 function ModalNovoExame({ colaborador, treinamentos, onFechar, onAtualizar, usuarioEmail }: {
-  colaborador: Colaborador
-  treinamentos: Treinamento[]
-  onFechar: () => void
-  onAtualizar: () => void
-  usuarioEmail: string
+  colaborador: Colaborador; treinamentos: Treinamento[]
+  onFechar: () => void; onAtualizar: () => void; usuarioEmail: string
 }) {
   const [form, setForm] = useState({ regra_id: '', data_realizacao: '', data_vencimento: '' })
   const [uploadArquivo, setUploadArquivo] = useState<File | null>(null)
@@ -124,11 +240,11 @@ function ModalNovoExame({ colaborador, treinamentos, onFechar, onAtualizar, usua
 
   useEffect(() => {
     if (form.regra_id && form.data_realizacao) {
-      const treinamento = treinamentos.find(t => t.id === parseInt(form.regra_id))
-      if (treinamento) {
-        const dataReal = new Date(form.data_realizacao + 'T12:00:00')
-        dataReal.setDate(dataReal.getDate() + treinamento.validade_dias)
-        setForm(f => ({ ...f, data_vencimento: dataReal.toISOString().split('T')[0] }))
+      const t = treinamentos.find(t => t.id === parseInt(form.regra_id))
+      if (t) {
+        const d = new Date(form.data_realizacao + 'T12:00:00')
+        d.setDate(d.getDate() + t.validade_dias)
+        setForm(f => ({ ...f, data_vencimento: d.toISOString().split('T')[0] }))
       }
     }
   }, [form.regra_id, form.data_realizacao])
@@ -139,25 +255,19 @@ function ModalNovoExame({ colaborador, treinamentos, onFechar, onAtualizar, usua
     try {
       await supabase.from('registros_exames').update({ is_atual: false })
         .eq('matricula_colaborador', colaborador.matricula).eq('regra_id', parseInt(form.regra_id))
-
-      const { data: novoRegistro, error: erroRegistro } = await supabase.from('registros_exames').insert({
-        matricula_colaborador: colaborador.matricula,
-        regra_id: parseInt(form.regra_id),
-        data_realizacao: form.data_realizacao,
-        data_vencimento: form.data_vencimento,
-        is_atual: true,
+      const { data: novo, error: e } = await supabase.from('registros_exames').insert({
+        matricula_colaborador: colaborador.matricula, regra_id: parseInt(form.regra_id),
+        data_realizacao: form.data_realizacao, data_vencimento: form.data_vencimento, is_atual: true,
       }).select().single()
-
-      if (erroRegistro) throw new Error(erroRegistro.message)
-
-      if (uploadArquivo && novoRegistro) {
-        const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
+      if (e) throw new Error(e.message)
+      if (uploadArquivo && novo) {
+        const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
         const ext = uploadArquivo.name.split('.').pop()
-        const path = `${colaborador.matricula}/${form.regra_id}/${timestamp}.${ext}`
-        const { error: storageError } = await supabase.storage.from('documentos').upload(path, uploadArquivo, { upsert: false })
-        if (!storageError) {
-          const { data: urlData } = supabase.storage.from('documentos').getPublicUrl(path)
-          await supabase.from('registros_exames').update({ url_arquivo: urlData.publicUrl }).eq('id', novoRegistro.id)
+        const path = `${colaborador.matricula}/${form.regra_id}/${ts}.${ext}`
+        const { error: se } = await supabase.storage.from('documentos').upload(path, uploadArquivo, { upsert: false })
+        if (!se) {
+          const { data: u } = supabase.storage.from('documentos').getPublicUrl(path)
+          await supabase.from('registros_exames').update({ url_arquivo: u.publicUrl }).eq('id', novo.id)
         }
       }
       onAtualizar(); onFechar()
@@ -165,10 +275,7 @@ function ModalNovoExame({ colaborador, treinamentos, onFechar, onAtualizar, usua
     setSalvando(false)
   }
 
-  const inputStyle: React.CSSProperties = {
-    width: '100%', height: 38, border: '1px solid #e0e0e0', borderRadius: 8,
-    padding: '0 12px', fontSize: 13, boxSizing: 'border-box', outline: 'none', backgroundColor: 'white',
-  }
+  const inputStyle: React.CSSProperties = { width: '100%', height: 38, border: '1px solid #e0e0e0', borderRadius: 8, padding: '0 12px', fontSize: 13, boxSizing: 'border-box', outline: 'none', backgroundColor: 'white' }
 
   return (
     <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 200 }}>
@@ -229,11 +336,7 @@ function CelulaExame({ registro, onClick, onClickIcone, compacto }: {
 }) {
   const pad = compacto ? '6px 8px' : '8px 12px'
   const minW = compacto ? 110 : 140
-
-  if (!registro) {
-    return <td style={{ padding: pad, textAlign: 'center', cursor: 'pointer', backgroundColor: '#f9f9f9', color: '#ccc', fontSize: 12, minWidth: minW, verticalAlign: 'middle' }} onClick={onClick}>—</td>
-  }
-
+  if (!registro) return <td style={{ padding: pad, textAlign: 'center', cursor: 'pointer', backgroundColor: '#f9f9f9', color: '#ccc', fontSize: 12, minWidth: minW, verticalAlign: 'middle' }} onClick={onClick}>—</td>
   const status = getStatusVencimento(registro.data_vencimento)
   const dias = getDiasParaVencer(registro.data_vencimento)
   const temArquivo = !!registro.url_arquivo
@@ -241,13 +344,10 @@ function CelulaExame({ registro, onClick, onClickIcone, compacto }: {
   const ultimaProgramacao = [...(registro.programacoes || [])].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0]
   const mostrarCalendario = dias <= 30 || !!ultimaProgramacao
   const cores: Record<string, string> = { valido: '#f0fdf4', proximo: '#fffbeb', vencido: '#fef2f2' }
-
   return (
     <td style={{ padding: pad, cursor: 'pointer', backgroundColor: cores[status], minWidth: minW, verticalAlign: 'middle', textAlign: 'center' }} onClick={onClick}>
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
-        <span style={{ fontSize: compacto ? 10 : 11, color: '#555', fontWeight: 500 }}>
-          {new Date(registro.data_vencimento).toLocaleDateString('pt-BR')}
-        </span>
+        <span style={{ fontSize: compacto ? 10 : 11, color: '#555', fontWeight: 500 }}>{new Date(registro.data_vencimento).toLocaleDateString('pt-BR')}</span>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           <span title={temArquivo ? 'Ver documento' : 'Anexar documento'} onClick={e => { e.stopPropagation(); onClickIcone('documento') }} style={{ cursor: 'pointer', display: 'flex' }}>
             <Icone tipo="clipe" cor={temArquivo ? '#2563eb' : '#9ca3af'} size={14} />
@@ -262,11 +362,7 @@ function CelulaExame({ registro, onClick, onClickIcone, compacto }: {
             </span>
           )}
         </div>
-        {ultimaProgramacao && (
-          <span style={{ fontSize: 10, color: '#7c3aed', fontStyle: 'italic' }}>
-            Prog: {new Date(ultimaProgramacao.data_programada + 'T12:00:00').toLocaleDateString('pt-BR')}
-          </span>
-        )}
+        {ultimaProgramacao && <span style={{ fontSize: 10, color: '#7c3aed', fontStyle: 'italic' }}>Prog: {new Date(ultimaProgramacao.data_programada + 'T12:00:00').toLocaleDateString('pt-BR')}</span>}
       </div>
     </td>
   )
@@ -280,11 +376,7 @@ function ThOrdenavel({ label, coluna, ordemAtual, direcao, onClick, style }: {
 }) {
   const ativo = ordemAtual === coluna
   return (
-    <th onClick={() => onClick(coluna)} style={{
-      padding: '10px 16px', textAlign: 'left', fontWeight: 700, color: ativo ? COR : '#333',
-      whiteSpace: 'nowrap', cursor: 'pointer', userSelect: 'none',
-      borderBottom: ativo ? `2px solid ${COR}` : '2px solid transparent', ...style,
-    }}>
+    <th onClick={() => onClick(coluna)} style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 700, color: ativo ? COR : '#333', whiteSpace: 'nowrap', cursor: 'pointer', userSelect: 'none', borderBottom: ativo ? `2px solid ${COR}` : '2px solid transparent', ...style }}>
       {label} {ativo ? (direcao === 'asc' ? '↑' : '↓') : <span style={{ color: '#ccc' }}>↕</span>}
     </th>
   )
@@ -308,8 +400,7 @@ function MultiSelectFuncao({ funcoes, selecionadas, onChange }: {
   return (
     <div ref={ref} style={{ position: 'relative' }}>
       <button onClick={() => setAberto(!aberto)} style={{ height: 36, border: `1px solid ${tem ? COR : '#e0e0e0'}`, borderRadius: 8, padding: '0 12px', fontSize: 13, backgroundColor: tem ? '#fdf2f5' : 'white', color: tem ? COR : '#555', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, minWidth: 160 }}>
-        {tem ? `Funções (${selecionadas.length})` : 'Todas as funções'}
-        <span style={{ marginLeft: 'auto', fontSize: 10 }}>{aberto ? '▲' : '▼'}</span>
+        {tem ? `Funções (${selecionadas.length})` : 'Todas as funções'}<span style={{ marginLeft: 'auto', fontSize: 10 }}>{aberto ? '▲' : '▼'}</span>
       </button>
       {aberto && (
         <div style={{ position: 'absolute', top: 40, left: 0, zIndex: 50, backgroundColor: 'white', border: '1px solid #e0e0e0', borderRadius: 10, boxShadow: '0 8px 24px rgba(0,0,0,0.12)', width: 260, maxHeight: 320, display: 'flex', flexDirection: 'column' }}>
@@ -406,14 +497,14 @@ function ModalExame({ dados, abaInicial, onFechar, onAtualizar, usuarioEmail, po
   async function fazerUpload() {
     if (!uploadArquivo || !registro) return
     setUploading(true); setErroUpload('')
-    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
+    const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
     const ext = uploadArquivo.name.split('.').pop()
-    const path = `${colaborador.matricula}/${treinamentoId}/${timestamp}.${ext}`
-    const { error: storageError } = await supabase.storage.from('documentos').upload(path, uploadArquivo, { upsert: false })
-    if (storageError) { setErroUpload(storageError.message); setUploading(false); return }
-    const { data: urlData } = supabase.storage.from('documentos').getPublicUrl(path)
-    const { error: dbError } = await supabase.from('registros_exames').update({ url_arquivo: urlData.publicUrl }).eq('id', registro.id)
-    if (dbError) { setErroUpload(dbError.message); setUploading(false); return }
+    const path = `${colaborador.matricula}/${treinamentoId}/${ts}.${ext}`
+    const { error: se } = await supabase.storage.from('documentos').upload(path, uploadArquivo, { upsert: false })
+    if (se) { setErroUpload(se.message); setUploading(false); return }
+    const { data: u } = supabase.storage.from('documentos').getPublicUrl(path)
+    const { error: de } = await supabase.from('registros_exames').update({ url_arquivo: u.publicUrl }).eq('id', registro.id)
+    if (de) { setErroUpload(de.message); setUploading(false); return }
     setUploadArquivo(null); setUploading(false); onAtualizar(); onFechar()
   }
 
@@ -652,10 +743,8 @@ export default function FuncionariosPage() {
         programacoes_exames (id, data_programada, observacao, criado_por, created_at)
       )
     `).eq('registros_exames.is_atual', true).order('nome')
-
     if (filtroSituacao) query = query.eq('situacao', filtroSituacao)
     if (filtroBase) query = query.eq('base_id', filtroBase)
-
     const { data } = await query
     const mapped = (data || []).map((c: any) => ({
       ...c,
@@ -691,6 +780,12 @@ export default function FuncionariosPage() {
   function limparFiltros() {
     setFiltroBusca(''); setFiltroFuncoes([]); setFiltroBase('')
     setFiltroSituacao('ATIVO'); setFiltroAdmissaoInput(''); setFiltroExameInput('')
+  }
+
+  function handleExportar(tipo: 'csv' | 'xlsx') {
+    const dados = gerarDadosExportacao(ordenados, treinamentos)
+    if (tipo === 'csv') exportarCSV(dados)
+    else exportarXLSX(dados)
   }
 
   const todasFuncoes = Array.from(new Set(colaboradores.map(c => c.funcoes?.nome).filter(Boolean) as string[])).sort()
@@ -737,8 +832,6 @@ export default function FuncionariosPage() {
 
   return (
     <div style={{ fontFamily: 'Arial, sans-serif', display: 'flex', flexDirection: 'column', height: '100%' }}>
-
-      {/* CABEÇALHO COMPACTO */}
       <h1 style={{ fontSize: 18, fontWeight: 600, color: '#1a1a1a', margin: '0 0 12px' }}>Painel Operacional</h1>
 
       {/* CARDS */}
@@ -793,9 +886,10 @@ export default function FuncionariosPage() {
         {temFiltroAtivo && <button onClick={limparFiltros} style={{ height: 36, padding: '0 12px', fontSize: 12, border: '1px solid #fca5a5', borderRadius: 8, backgroundColor: '#fef2f2', color: '#dc2626', cursor: 'pointer' }}>✕ Limpar</button>}
         <button onClick={() => setCompacto(c => !c)} style={{ height: 36, padding: '0 12px', fontSize: 12, border: `1px solid ${compacto ? COR : '#e0e0e0'}`, borderRadius: 8, backgroundColor: compacto ? '#fdf2f5' : 'white', color: compacto ? COR : '#555', cursor: 'pointer' }}>⊟ Compacto</button>
         {colunasVisiveis.length > 0 && <SeletorColunas colunas={todasColunasDef} visiveis={colunasVisiveis} onChange={setColunasVisiveis} />}
+        <BotaoExportar onClick={handleExportar} />
       </div>
 
-      {/* TABELA com scroll fixo */}
+      {/* TABELA */}
       {carregando ? <p style={{ color: '#888', fontSize: 14 }}>Carregando...</p> : (
         <div style={{ overflowX: 'auto', overflowY: 'auto', maxHeight: 'calc(100vh - 230px)', borderRadius: 12, border: '1px solid #f0f0f0', flex: 1 }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', backgroundColor: 'white', fontSize }}>
