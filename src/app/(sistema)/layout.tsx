@@ -10,7 +10,13 @@ export default function SistemaLayout({
     <AuthProvider>
       <div style={{ display: 'flex', minHeight: '100vh', backgroundColor: '#f5f5f5' }}>
         <Sidebar />
-   <main style={{ marginLeft: 220, flex: 1, padding: '32px', minWidth: 0 }}>
+        <main style={{
+          marginLeft: 'var(--sidebar-width, 220px)',
+          flex: 1,
+          padding: '32px',
+          minWidth: 0,
+          transition: 'margin-left 0.2s ease',
+        }}>
           {children}
         </main>
       </div>

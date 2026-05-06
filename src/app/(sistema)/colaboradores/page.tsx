@@ -20,8 +20,31 @@ interface Colaborador {
 interface Base { id: number; nome: string }
 interface Funcao { id: number; nome: string }
 
+type OrdemColuna = 'nome' | 'matricula' | 'funcao' | 'base' | 'admissao' | 'situacao'
+type OrdemDirecao = 'asc' | 'desc'
+
 const SITUACOES = ['ATIVO', 'AF.PREVIDENCIA', 'APOS.INVALIDEZ', 'DEMITIDO']
 const POR_PAGINA = 50
+const COR = '#9f183c'
+
+function ThOrdenavel({ label, coluna, ordemAtual, direcao, onClick, style }: {
+  label: string; coluna: OrdemColuna; ordemAtual: OrdemColuna
+  direcao: OrdemDirecao; onClick: (col: OrdemColuna) => void; style?: React.CSSProperties
+}) {
+  const ativo = ordemAtual === coluna
+  return (
+    <th onClick={() => onClick(coluna)} style={{
+      padding: '10px 16px', textAlign: 'left', fontWeight: 700,
+      color: ativo ? COR : '#333', whiteSpace: 'nowrap',
+      cursor: 'pointer', userSelect: 'none',
+      borderBottom: ativo ? `2px solid ${COR}` : '2px solid transparent',
+      position: 'sticky', top: 0, backgroundColor: '#fafafa', zIndex: 3,
+      ...style,
+    }}>
+      {label} {ativo ? (direcao === 'asc' ? '↑' : '↓') : <span style={{ color: '#ccc' }}>↕</span>}
+    </th>
+  )
+}
 
 export default function ColaboradoresPage() {
   const router = useRouter()
@@ -38,15 +61,11 @@ export default function ColaboradoresPage() {
   const [modalAberto, setModalAberto] = useState(false)
   const [salvando, setSalvando] = useState(false)
   const [erro, setErro] = useState<string | null>(null)
+  const [ordemColuna, setOrdemColuna] = useState<OrdemColuna>('nome')
+  const [ordemDirecao, setOrdemDirecao] = useState<OrdemDirecao>('asc')
   const [form, setForm] = useState({
-    matricula: '',
-    nome: '',
-    funcao_id: '',
-    base_id: '',
-    data_admissao: '',
-    data_demissao: '',
-    email_corporativo: '',
-    situacao: 'ATIVO',
+    matricula: '', nome: '', funcao_id: '', base_id: '',
+    data_admissao: '', data_demissao: '', email_corporativo: '', situacao: 'ATIVO',
   })
   const [editando, setEditando] = useState<string | null>(null)
 
@@ -92,6 +111,23 @@ export default function ColaboradoresPage() {
     buscar(filtroBase, filtroFuncao, filtroSituacao, 1, filtroBusca)
   }, [filtroBase, filtroFuncao, filtroSituacao, filtroBusca])
 
+  function toggleOrdem(coluna: OrdemColuna) {
+    if (ordemColuna === coluna) setOrdemDirecao(d => d === 'asc' ? 'desc' : 'asc')
+    else { setOrdemColuna(coluna); setOrdemDirecao('asc') }
+  }
+
+  // Ordenação client-side (dentro da página atual)
+  const ordenados = [...colaboradores].sort((a, b) => {
+    let vA = '', vB = ''
+    if (ordemColuna === 'nome') { vA = a.nome; vB = b.nome }
+    else if (ordemColuna === 'matricula') { vA = a.matricula; vB = b.matricula }
+    else if (ordemColuna === 'funcao') { vA = a.funcoes?.nome || ''; vB = b.funcoes?.nome || '' }
+    else if (ordemColuna === 'base') { vA = a.bases?.nome || ''; vB = b.bases?.nome || '' }
+    else if (ordemColuna === 'admissao') { vA = a.data_admissao || ''; vB = b.data_admissao || '' }
+    else if (ordemColuna === 'situacao') { vA = a.situacao; vB = b.situacao }
+    return ordemDirecao === 'asc' ? vA.localeCompare(vB) : vB.localeCompare(vA)
+  })
+
   function abrirNovo() {
     setEditando(null)
     setForm({ matricula: '', nome: '', funcao_id: '', base_id: '', data_admissao: '', data_demissao: '', email_corporativo: '', situacao: 'ATIVO' })
@@ -102,33 +138,25 @@ export default function ColaboradoresPage() {
   function abrirEdicao(c: Colaborador) {
     setEditando(c.matricula)
     setForm({
-      matricula: c.matricula,
-      nome: c.nome,
-      funcao_id: c.funcao_id?.toString() || '',
-      base_id: c.base_id?.toString() || '',
-      data_admissao: c.data_admissao || '',
-      data_demissao: c.data_demissao || '',
-      email_corporativo: c.email_corporativo || '',
-      situacao: c.situacao,
+      matricula: c.matricula, nome: c.nome,
+      funcao_id: c.funcao_id?.toString() || '', base_id: c.base_id?.toString() || '',
+      data_admissao: c.data_admissao || '', data_demissao: c.data_demissao || '',
+      email_corporativo: c.email_corporativo || '', situacao: c.situacao,
     })
     setErro(null)
     setModalAberto(true)
   }
 
   async function salvar() {
-    if (!form.nome || !form.matricula) { setErro('Nome e matricula sao obrigatorios.'); return }
-    setSalvando(true)
-    setErro(null)
+    if (!form.nome || !form.matricula) { setErro('Nome e matrícula são obrigatórios.'); return }
+    setSalvando(true); setErro(null)
 
     const payload = {
-      matricula: form.matricula,
-      nome: form.nome.toUpperCase(),
+      matricula: form.matricula, nome: form.nome.toUpperCase(),
       funcao_id: form.funcao_id ? parseInt(form.funcao_id) : null,
       base_id: form.base_id ? parseInt(form.base_id) : null,
-      data_admissao: form.data_admissao || null,
-      data_demissao: form.data_demissao || null,
-      email_corporativo: form.email_corporativo || null,
-      situacao: form.situacao,
+      data_admissao: form.data_admissao || null, data_demissao: form.data_demissao || null,
+      email_corporativo: form.email_corporativo || null, situacao: form.situacao,
     }
 
     if (editando) {
@@ -139,94 +167,84 @@ export default function ColaboradoresPage() {
       if (error) { setErro('Erro ao cadastrar: ' + error.message); setSalvando(false); return }
     }
 
-    setSalvando(false)
-    setModalAberto(false)
+    setSalvando(false); setModalAberto(false)
     await buscar(filtroBase, filtroFuncao, filtroSituacao, pagina, filtroBusca)
   }
 
   const totalPaginas = Math.ceil(total / POR_PAGINA)
 
   const inputStyle = {
-    width: '100%',
-    height: 38,
-    border: '1px solid #e0e0e0',
-    borderRadius: 8,
-    padding: '0 12px',
-    fontSize: 13,
-    color: '#333',
-    backgroundColor: '#fafafa',
-    outline: 'none',
-    boxSizing: 'border-box' as const,
+    width: '100%', height: 38, border: '1px solid #e0e0e0', borderRadius: 8,
+    padding: '0 12px', fontSize: 13, color: '#333', backgroundColor: '#fafafa',
+    outline: 'none', boxSizing: 'border-box' as const,
   }
 
-  const labelStyle = {
-    display: 'block' as const,
-    fontSize: 12,
-    color: '#666',
-    marginBottom: 5,
+  const labelStyle = { display: 'block' as const, fontSize: 12, color: '#666', marginBottom: 5 }
+
+  const selectStyle = {
+    height: 38, border: '1px solid #e0e0e0', borderRadius: 8,
+    padding: '0 12px', fontSize: 13, backgroundColor: 'white', color: '#555',
+    outline: 'none', boxSizing: 'border-box' as const,
   }
 
   return (
-    <div style={{ fontFamily: 'Arial, sans-serif' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 24 }}>
-        <div>
-          <h1 style={{ fontSize: 22, fontWeight: 500, color: '#1a1a1a', marginBottom: 4 }}>Colaboradores</h1>
-          <p style={{ fontSize: 14, color: '#888', margin: 0 }}>Gestão de colaboradores da CGB</p>
-        </div>
+    <div style={{ fontFamily: 'Arial, sans-serif', display: 'flex', flexDirection: 'column', height: '100%' }}>
+
+      {/* CABEÇALHO */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+        <h1 style={{ fontSize: 18, fontWeight: 600, color: '#1a1a1a', margin: 0 }}>Colaboradores</h1>
         <button onClick={abrirNovo} style={{
-          height: 38, backgroundColor: '#9f183c', color: 'white',
-          border: 'none', borderRadius: 8, padding: '0 20px',
+          height: 36, backgroundColor: COR, color: 'white',
+          border: 'none', borderRadius: 8, padding: '0 18px',
           fontSize: 13, fontWeight: 500, cursor: 'pointer',
         }}>
           + Novo Colaborador
         </button>
       </div>
 
-      <div style={{ display: 'flex', gap: 12, marginBottom: 20, flexWrap: 'wrap' as const }}>
-        <input
-          type="text"
-          placeholder="Buscar por nome ou matrícula..."
-          value={filtroBusca}
+      {/* FILTROS */}
+      <div style={{ display: 'flex', gap: 10, marginBottom: 12, flexWrap: 'wrap' as const, alignItems: 'center' }}>
+        <input type="text" placeholder="Buscar por nome ou matrícula..." value={filtroBusca}
           onChange={e => setFiltroBusca(e.target.value)}
-          style={{ ...inputStyle, width: 260 }}
-        />
-        <select value={filtroBase} onChange={e => setFiltroBase(e.target.value)}
-          style={{ ...inputStyle, width: 180 }}>
+          style={{ ...selectStyle, width: 260 }} />
+        <select value={filtroBase} onChange={e => setFiltroBase(e.target.value)} style={{ ...selectStyle, width: 180 }}>
           <option value="">Todas as bases</option>
           {bases.map(b => <option key={b.id} value={b.id}>{b.nome}</option>)}
         </select>
-        <select value={filtroFuncao} onChange={e => setFiltroFuncao(e.target.value)}
-          style={{ ...inputStyle, width: 220 }}>
+        <select value={filtroFuncao} onChange={e => setFiltroFuncao(e.target.value)} style={{ ...selectStyle, width: 220 }}>
           <option value="">Todas as funções</option>
           {funcoes.map(f => <option key={f.id} value={f.id}>{f.nome}</option>)}
         </select>
-        <select value={filtroSituacao} onChange={e => setFiltroSituacao(e.target.value)}
-          style={{ ...inputStyle, width: 160 }}>
+        <select value={filtroSituacao} onChange={e => setFiltroSituacao(e.target.value)} style={{ ...selectStyle, width: 160 }}>
           <option value="">Todas as situações</option>
           {SITUACOES.map(s => <option key={s} value={s}>{s}</option>)}
         </select>
-        <span style={{ fontSize: 13, color: '#888', alignSelf: 'center' }}>
-          {total} colaboradores
-        </span>
+        <span style={{ fontSize: 13, color: '#888', alignSelf: 'center' }}>{total} colaboradores</span>
       </div>
 
+      {/* TABELA */}
       {carregando ? (
         <p style={{ color: '#888', fontSize: 14 }}>Carregando...</p>
       ) : (
         <>
-          <div style={{ overflowX: 'auto', borderRadius: 12, border: '1px solid #f0f0f0' }}>
+          <div style={{ overflowX: 'auto', overflowY: 'auto', maxHeight: 'calc(100vh - 200px)', borderRadius: 12, border: '1px solid #f0f0f0', flex: 1 }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', backgroundColor: 'white', fontSize: 13 }}>
               <thead>
                 <tr style={{ backgroundColor: '#fafafa', borderBottom: '1px solid #f0f0f0' }}>
-                  {['Nome', 'Matrícula', 'Função', 'Base', 'Admissão', 'E-mail', 'Situação', ''].map((h, i) => (
-                    <th key={i} style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 500, color: '#555', whiteSpace: 'nowrap' }}>{h}</th>
-                  ))}
+                  <ThOrdenavel label="Nome" coluna="nome" ordemAtual={ordemColuna} direcao={ordemDirecao} onClick={toggleOrdem} style={{ left: 0, minWidth: 200 }} />
+                  <ThOrdenavel label="Matrícula" coluna="matricula" ordemAtual={ordemColuna} direcao={ordemDirecao} onClick={toggleOrdem} />
+                  <ThOrdenavel label="Função" coluna="funcao" ordemAtual={ordemColuna} direcao={ordemDirecao} onClick={toggleOrdem} />
+                  <ThOrdenavel label="Base" coluna="base" ordemAtual={ordemColuna} direcao={ordemDirecao} onClick={toggleOrdem} />
+                  <ThOrdenavel label="Admissão" coluna="admissao" ordemAtual={ordemColuna} direcao={ordemDirecao} onClick={toggleOrdem} />
+                  <th style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 700, color: '#333', whiteSpace: 'nowrap', position: 'sticky', top: 0, backgroundColor: '#fafafa', zIndex: 3 }}>E-mail</th>
+                  <ThOrdenavel label="Situação" coluna="situacao" ordemAtual={ordemColuna} direcao={ordemDirecao} onClick={toggleOrdem} />
+                  <th style={{ padding: '10px 16px', position: 'sticky', top: 0, backgroundColor: '#fafafa', zIndex: 3 }} />
                 </tr>
               </thead>
               <tbody>
-                {colaboradores.map((c, i) => (
+                {ordenados.map((c, i) => (
                   <tr key={c.matricula} style={{ borderBottom: '1px solid #f5f5f5', backgroundColor: i % 2 === 0 ? 'white' : '#fafafa' }}>
-                    <td style={{ padding: '10px 16px', fontWeight: 500, color: '#333' }}>{c.nome}</td>
+                    <td style={{ padding: '10px 16px', fontWeight: 500, color: '#333', whiteSpace: 'nowrap' }}>{c.nome}</td>
                     <td style={{ padding: '10px 16px', color: '#666' }}>{c.matricula}</td>
                     <td style={{ padding: '10px 16px', color: '#666' }}>{c.funcoes?.nome || '—'}</td>
                     <td style={{ padding: '10px 16px', color: '#666', whiteSpace: 'nowrap' }}>{c.bases?.nome || '—'}</td>
@@ -243,14 +261,14 @@ export default function ColaboradoresPage() {
                     </td>
                     <td style={{ padding: '10px 16px' }}>
                       <button onClick={() => abrirEdicao(c)} style={{
-                        fontSize: 12, color: '#9f183c', background: 'none',
-                        border: '1px solid #9f183c', borderRadius: 6,
+                        fontSize: 12, color: COR, background: 'none',
+                        border: `1px solid ${COR}`, borderRadius: 6,
                         padding: '4px 12px', cursor: 'pointer',
                       }}>Editar</button>
                     </td>
                   </tr>
                 ))}
-                {colaboradores.length === 0 && (
+                {ordenados.length === 0 && (
                   <tr>
                     <td colSpan={8} style={{ padding: '32px', textAlign: 'center', color: '#aaa', fontSize: 14 }}>
                       Nenhum colaborador encontrado.
@@ -263,26 +281,22 @@ export default function ColaboradoresPage() {
 
           {/* PAGINAÇÃO */}
           {total > POR_PAGINA && (
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 0' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 0' }}>
               <span style={{ fontSize: 13, color: '#888' }}>
                 Mostrando {((pagina - 1) * POR_PAGINA) + 1}–{Math.min(pagina * POR_PAGINA, total)} de {total}
               </span>
               <div style={{ display: 'flex', gap: 8 }}>
-                <button
-                  onClick={() => { const p = pagina - 1; setPagina(p); buscar(filtroBase, filtroFuncao, filtroSituacao, p, filtroBusca) }}
+                <button onClick={() => { const p = pagina - 1; setPagina(p); buscar(filtroBase, filtroFuncao, filtroSituacao, p, filtroBusca) }}
                   disabled={pagina === 1}
-                  style={{ height: 34, padding: '0 16px', border: '1px solid #e0e0e0', borderRadius: 8, fontSize: 13, cursor: pagina === 1 ? 'not-allowed' : 'pointer', backgroundColor: 'white', color: pagina === 1 ? '#ccc' : '#333' }}
-                >
+                  style={{ height: 34, padding: '0 16px', border: '1px solid #e0e0e0', borderRadius: 8, fontSize: 13, cursor: pagina === 1 ? 'not-allowed' : 'pointer', backgroundColor: 'white', color: pagina === 1 ? '#ccc' : '#333' }}>
                   Anterior
                 </button>
                 <span style={{ height: 34, padding: '0 16px', display: 'flex', alignItems: 'center', fontSize: 13, color: '#555' }}>
                   Página {pagina} de {totalPaginas}
                 </span>
-                <button
-                  onClick={() => { const p = pagina + 1; setPagina(p); buscar(filtroBase, filtroFuncao, filtroSituacao, p, filtroBusca) }}
+                <button onClick={() => { const p = pagina + 1; setPagina(p); buscar(filtroBase, filtroFuncao, filtroSituacao, p, filtroBusca) }}
                   disabled={pagina >= totalPaginas}
-                  style={{ height: 34, padding: '0 16px', border: '1px solid #e0e0e0', borderRadius: 8, fontSize: 13, cursor: pagina >= totalPaginas ? 'not-allowed' : 'pointer', backgroundColor: 'white', color: pagina >= totalPaginas ? '#ccc' : '#333' }}
-                >
+                  style={{ height: 34, padding: '0 16px', border: '1px solid #e0e0e0', borderRadius: 8, fontSize: 13, cursor: pagina >= totalPaginas ? 'not-allowed' : 'pointer', backgroundColor: 'white', color: pagina >= totalPaginas ? '#ccc' : '#333' }}>
                   Próxima
                 </button>
               </div>
@@ -291,20 +305,13 @@ export default function ColaboradoresPage() {
         </>
       )}
 
+      {/* MODAL */}
       {modalAberto && (
-        <div style={{
-          position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.4)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100,
-        }}>
-          <div style={{
-            backgroundColor: 'white', borderRadius: 16, padding: 32,
-            width: '100%', maxWidth: 560, maxHeight: '90vh', overflowY: 'auto',
-          }}>
+        <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100 }}>
+          <div style={{ backgroundColor: 'white', borderRadius: 16, padding: 32, width: '100%', maxWidth: 560, maxHeight: '90vh', overflowY: 'auto' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 24 }}>
-              <h2 style={{ fontSize: 18, fontWeight: 500, margin: 0 }}>
-                {editando ? 'Editar Colaborador' : 'Novo Colaborador'}
-              </h2>
-              <button onClick={() => setModalAberto(false)} style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: '#888' }}>x</button>
+              <h2 style={{ fontSize: 18, fontWeight: 500, margin: 0 }}>{editando ? 'Editar Colaborador' : 'Novo Colaborador'}</h2>
+              <button onClick={() => setModalAberto(false)} style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: '#888' }}>✕</button>
             </div>
 
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
@@ -357,18 +364,10 @@ export default function ColaboradoresPage() {
             )}
 
             <div style={{ display: 'flex', gap: 12, marginTop: 24, justifyContent: 'flex-end' }}>
-              <button onClick={() => setModalAberto(false)} style={{
-                height: 38, padding: '0 20px', border: '1px solid #e0e0e0',
-                borderRadius: 8, fontSize: 13, cursor: 'pointer', background: 'white', color: '#555',
-              }}>
+              <button onClick={() => setModalAberto(false)} style={{ height: 38, padding: '0 20px', border: '1px solid #e0e0e0', borderRadius: 8, fontSize: 13, cursor: 'pointer', background: 'white', color: '#555' }}>
                 Cancelar
               </button>
-              <button onClick={salvar} disabled={salvando} style={{
-                height: 38, padding: '0 24px', backgroundColor: '#9f183c',
-                color: 'white', border: 'none', borderRadius: 8,
-                fontSize: 13, fontWeight: 500, cursor: 'pointer',
-                opacity: salvando ? 0.7 : 1,
-              }}>
+              <button onClick={salvar} disabled={salvando} style={{ height: 38, padding: '0 24px', backgroundColor: COR, color: 'white', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 500, cursor: 'pointer', opacity: salvando ? 0.7 : 1 }}>
                 {salvando ? 'Salvando...' : 'Salvar'}
               </button>
             </div>
