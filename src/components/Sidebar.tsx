@@ -51,7 +51,7 @@ export default function Sidebar() {
 
   const todosItens = [
     { label: 'Dashboard',     href: '/dashboard',     niveis: ['admin', 'operador', 'visualizador'] },
-    { label: 'Funcionários',  href: '/funcionarios',  niveis: ['admin', 'operador', 'visualizador'] },
+    { label: 'Painel Operacional',  href: '/funcionarios',  niveis: ['admin', 'operador', 'visualizador'] },
     { label: 'Colaboradores', href: '/colaboradores', niveis: ['admin', 'operador'] },
     { label: 'Auditoria',     href: '/auditoria',     niveis: ['admin', 'operador'] },
     { label: 'Configurações', href: '/configuracoes', niveis: ['admin'] },

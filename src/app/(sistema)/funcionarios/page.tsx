@@ -739,7 +739,7 @@ export default function FuncionariosPage() {
     <div style={{ fontFamily: 'Arial, sans-serif', display: 'flex', flexDirection: 'column', height: '100%' }}>
 
       {/* CABEÇALHO COMPACTO */}
-      <h1 style={{ fontSize: 18, fontWeight: 600, color: '#1a1a1a', margin: '0 0 12px' }}>Painel de Exames</h1>
+      <h1 style={{ fontSize: 18, fontWeight: 600, color: '#1a1a1a', margin: '0 0 12px' }}>Painel Operacional</h1>
 
       {/* CARDS */}
       {carregando ? (
