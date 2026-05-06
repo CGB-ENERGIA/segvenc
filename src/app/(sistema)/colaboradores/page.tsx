@@ -50,7 +50,7 @@ export default function ColaboradoresPage() {
   })
   const [editando, setEditando] = useState<string | null>(null)
 
-  async function buscar(base: string, funcao: string, situacao: string, pag: number = 1) {
+  async function buscar(base: string, funcao: string, situacao: string, pag: number = 1, busca: string = '') {
     setCarregando(true)
     const from = (pag - 1) * POR_PAGINA
     const to = from + POR_PAGINA - 1
@@ -64,6 +64,7 @@ export default function ColaboradoresPage() {
     if (situacao) q = q.eq('situacao', situacao)
     if (base) q = q.eq('base_id', parseInt(base))
     if (funcao) q = q.eq('funcao_id', parseInt(funcao))
+    if (busca) q = q.or(`nome.ilike.%${busca}%,matricula.ilike.%${busca}%`)
 
     const { data, count } = await q
     setColaboradores((data as unknown as Colaborador[]) || [])
@@ -81,22 +82,15 @@ export default function ColaboradoresPage() {
       ])
       setBases(b || [])
       setFuncoes(f || [])
-      await buscar('', '', 'ATIVO', 1)
+      await buscar('', '', 'ATIVO', 1, '')
     }
     init()
   }, [])
 
   useEffect(() => {
     setPagina(1)
-    buscar(filtroBase, filtroFuncao, filtroSituacao, 1)
-  }, [filtroBase, filtroFuncao, filtroSituacao])
-
-  const filtrados = filtroBusca
-    ? colaboradores.filter(c =>
-        c.nome.toLowerCase().includes(filtroBusca.toLowerCase()) ||
-        c.matricula.includes(filtroBusca)
-      )
-    : colaboradores
+    buscar(filtroBase, filtroFuncao, filtroSituacao, 1, filtroBusca)
+  }, [filtroBase, filtroFuncao, filtroSituacao, filtroBusca])
 
   function abrirNovo() {
     setEditando(null)
@@ -147,7 +141,7 @@ export default function ColaboradoresPage() {
 
     setSalvando(false)
     setModalAberto(false)
-    await buscar(filtroBase, filtroFuncao, filtroSituacao, pagina)
+    await buscar(filtroBase, filtroFuncao, filtroSituacao, pagina, filtroBusca)
   }
 
   const totalPaginas = Math.ceil(total / POR_PAGINA)
@@ -191,7 +185,7 @@ export default function ColaboradoresPage() {
       <div style={{ display: 'flex', gap: 12, marginBottom: 20, flexWrap: 'wrap' as const }}>
         <input
           type="text"
-          placeholder="Buscar por nome ou matricula..."
+          placeholder="Buscar por nome ou matrícula..."
           value={filtroBusca}
           onChange={e => setFiltroBusca(e.target.value)}
           style={{ ...inputStyle, width: 260 }}
@@ -230,7 +224,7 @@ export default function ColaboradoresPage() {
                 </tr>
               </thead>
               <tbody>
-                {filtrados.map((c, i) => (
+                {colaboradores.map((c, i) => (
                   <tr key={c.matricula} style={{ borderBottom: '1px solid #f5f5f5', backgroundColor: i % 2 === 0 ? 'white' : '#fafafa' }}>
                     <td style={{ padding: '10px 16px', fontWeight: 500, color: '#333' }}>{c.nome}</td>
                     <td style={{ padding: '10px 16px', color: '#666' }}>{c.matricula}</td>
@@ -256,6 +250,13 @@ export default function ColaboradoresPage() {
                     </td>
                   </tr>
                 ))}
+                {colaboradores.length === 0 && (
+                  <tr>
+                    <td colSpan={8} style={{ padding: '32px', textAlign: 'center', color: '#aaa', fontSize: 14 }}>
+                      Nenhum colaborador encontrado.
+                    </td>
+                  </tr>
+                )}
               </tbody>
             </table>
           </div>
@@ -268,7 +269,7 @@ export default function ColaboradoresPage() {
               </span>
               <div style={{ display: 'flex', gap: 8 }}>
                 <button
-                  onClick={() => { const p = pagina - 1; setPagina(p); buscar(filtroBase, filtroFuncao, filtroSituacao, p) }}
+                  onClick={() => { const p = pagina - 1; setPagina(p); buscar(filtroBase, filtroFuncao, filtroSituacao, p, filtroBusca) }}
                   disabled={pagina === 1}
                   style={{ height: 34, padding: '0 16px', border: '1px solid #e0e0e0', borderRadius: 8, fontSize: 13, cursor: pagina === 1 ? 'not-allowed' : 'pointer', backgroundColor: 'white', color: pagina === 1 ? '#ccc' : '#333' }}
                 >
@@ -278,7 +279,7 @@ export default function ColaboradoresPage() {
                   Página {pagina} de {totalPaginas}
                 </span>
                 <button
-                  onClick={() => { const p = pagina + 1; setPagina(p); buscar(filtroBase, filtroFuncao, filtroSituacao, p) }}
+                  onClick={() => { const p = pagina + 1; setPagina(p); buscar(filtroBase, filtroFuncao, filtroSituacao, p, filtroBusca) }}
                   disabled={pagina >= totalPaginas}
                   style={{ height: 34, padding: '0 16px', border: '1px solid #e0e0e0', borderRadius: 8, fontSize: 13, cursor: pagina >= totalPaginas ? 'not-allowed' : 'pointer', backgroundColor: 'white', color: pagina >= totalPaginas ? '#ccc' : '#333' }}
                 >
