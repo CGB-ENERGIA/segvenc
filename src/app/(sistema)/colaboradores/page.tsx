@@ -11,17 +11,28 @@ interface Colaborador {
   funcoes: { nome: string } | null
   funcao_id: number | null
   base_id: number | null
+  gerencia_id: number | null
+  contato: string | null
+  processo: string | null
   data_admissao: string | null
   data_demissao: string | null
   email_corporativo: string | null
   situacao: string
   bases: { nome: string } | null
+  gerencias: { sigla: string } | null
 }
 
 interface Base { id: number; nome: string }
 interface Funcao { id: number; nome: string }
+interface Gerencia {
+  id: number
+  sigla: string
+  nome: string
+  gerente_matricula: string | null
+  colaboradores?: { nome: string } | null
+}
 
-type OrdemColuna = 'nome' | 'matricula' | 'funcao' | 'base' | 'admissao' | 'situacao'
+type OrdemColuna = 'nome' | 'matricula' | 'funcao' | 'base' | 'gerencia' | 'admissao' | 'situacao'
 type OrdemDirecao = 'asc' | 'desc'
 type FiltroCard = 'ATIVO' | 'AF.PREVIDENCIA' | 'APOS.INVALIDEZ' | 'DEMITIDO' | null
 
@@ -58,6 +69,7 @@ export default function ColaboradoresPage() {
   const [colaboradores, setColaboradores] = useState<Colaborador[]>([])
   const [bases, setBases] = useState<Base[]>([])
   const [funcoes, setFuncoes] = useState<Funcao[]>([])
+  const [gerencias, setGerencias] = useState<Gerencia[]>([])
   const [carregando, setCarregando] = useState(true)
   const [filtroBase, setFiltroBase] = useState('')
   const [filtroFuncao, setFiltroFuncao] = useState('')
@@ -81,6 +93,7 @@ export default function ColaboradoresPage() {
   const [ordemDirecao, setOrdemDirecao] = useState<OrdemDirecao>('asc')
   const [form, setForm] = useState({
     matricula: '', nome: '', funcao_id: '', base_id: '',
+    gerencia_id: '', contato: '', processo: '',
     data_admissao: '', data_demissao: '', email_corporativo: '', situacao: 'ATIVO',
   })
   const [editando, setEditando] = useState<string | null>(null)
@@ -112,7 +125,10 @@ export default function ColaboradoresPage() {
 
     let q = supabase
       .from('colaboradores')
-      .select('matricula, nome, funcao_id, base_id, data_admissao, data_demissao, email_corporativo, situacao, bases(nome), funcoes(nome)', { count: 'exact' })
+      .select(
+        'matricula, nome, funcao_id, base_id, gerencia_id, contato, processo, data_admissao, data_demissao, email_corporativo, situacao, bases(nome), funcoes(nome), gerencias(sigla)',
+        { count: 'exact' }
+      )
       .order('nome')
       .range(from, to)
 
@@ -131,12 +147,14 @@ export default function ColaboradoresPage() {
     async function init() {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) { router.push('/login'); return }
-      const [{ data: b }, { data: f }] = await Promise.all([
+      const [{ data: b }, { data: f }, { data: g }] = await Promise.all([
         supabase.from('bases').select('id, nome').order('nome'),
         supabase.from('funcoes').select('id, nome').order('nome'),
+        supabase.from('gerencias').select('id, sigla, nome, gerente_matricula, colaboradores(nome)').order('sigla'),
       ])
       setBases(b || [])
       setFuncoes(f || [])
+      setGerencias((g as unknown as Gerencia[]) || [])
       await Promise.all([buscar('', '', 'ATIVO', 1, ''), buscarStats()])
     }
     init()
@@ -169,6 +187,7 @@ export default function ColaboradoresPage() {
     else if (ordemColuna === 'matricula') { vA = a.matricula; vB = b.matricula }
     else if (ordemColuna === 'funcao') { vA = a.funcoes?.nome || ''; vB = b.funcoes?.nome || '' }
     else if (ordemColuna === 'base') { vA = a.bases?.nome || ''; vB = b.bases?.nome || '' }
+    else if (ordemColuna === 'gerencia') { vA = a.gerencias?.sigla || ''; vB = b.gerencias?.sigla || '' }
     else if (ordemColuna === 'admissao') { vA = a.data_admissao || ''; vB = b.data_admissao || '' }
     else if (ordemColuna === 'situacao') { vA = a.situacao; vB = b.situacao }
     return ordemDirecao === 'asc' ? vA.localeCompare(vB) : vB.localeCompare(vA)
@@ -176,7 +195,11 @@ export default function ColaboradoresPage() {
 
   function abrirNovo() {
     setEditando(null)
-    setForm({ matricula: '', nome: '', funcao_id: '', base_id: '', data_admissao: '', data_demissao: '', email_corporativo: '', situacao: 'ATIVO' })
+    setForm({
+      matricula: '', nome: '', funcao_id: '', base_id: '',
+      gerencia_id: '', contato: '', processo: '',
+      data_admissao: '', data_demissao: '', email_corporativo: '', situacao: 'ATIVO',
+    })
     setErro(null)
     setModalAberto(true)
   }
@@ -185,9 +208,15 @@ export default function ColaboradoresPage() {
     setEditando(c.matricula)
     setForm({
       matricula: c.matricula, nome: c.nome,
-      funcao_id: c.funcao_id?.toString() || '', base_id: c.base_id?.toString() || '',
-      data_admissao: c.data_admissao || '', data_demissao: c.data_demissao || '',
-      email_corporativo: c.email_corporativo || '', situacao: c.situacao,
+      funcao_id: c.funcao_id?.toString() || '',
+      base_id: c.base_id?.toString() || '',
+      gerencia_id: c.gerencia_id?.toString() || '',
+      contato: c.contato || '',
+      processo: c.processo || '',
+      data_admissao: c.data_admissao || '',
+      data_demissao: c.data_demissao || '',
+      email_corporativo: c.email_corporativo || '',
+      situacao: c.situacao,
     })
     setErro(null)
     setModalAberto(true)
@@ -200,8 +229,13 @@ export default function ColaboradoresPage() {
       matricula: form.matricula, nome: form.nome.toUpperCase(),
       funcao_id: form.funcao_id ? parseInt(form.funcao_id) : null,
       base_id: form.base_id ? parseInt(form.base_id) : null,
-      data_admissao: form.data_admissao || null, data_demissao: form.data_demissao || null,
-      email_corporativo: form.email_corporativo || null, situacao: form.situacao,
+      gerencia_id: form.gerencia_id ? parseInt(form.gerencia_id) : null,
+      contato: form.contato || null,
+      processo: form.processo || null,
+      data_admissao: form.data_admissao || null,
+      data_demissao: form.data_demissao || null,
+      email_corporativo: form.email_corporativo || null,
+      situacao: form.situacao,
     }
     if (editando) {
       const { error } = await supabase.from('colaboradores').update(payload).eq('matricula', editando)
@@ -235,6 +269,8 @@ export default function ColaboradoresPage() {
     if (s === 'APOS.INVALIDEZ') return { bg: '#eff6ff', cor: '#2563eb' }
     return { bg: '#fef2f2', cor: '#dc2626' }
   }
+
+  const gerenciaSelecionada = gerencias.find(g => g.id.toString() === form.gerencia_id)
 
   const inputStyle: React.CSSProperties = {
     width: '100%', height: 38, border: '1px solid #e0e0e0', borderRadius: 8,
@@ -350,6 +386,7 @@ export default function ColaboradoresPage() {
                   <ThOrdenavel label="Matrícula" coluna="matricula" ordemAtual={ordemColuna} direcao={ordemDirecao} onClick={toggleOrdem} />
                   <ThOrdenavel label="Função" coluna="funcao" ordemAtual={ordemColuna} direcao={ordemDirecao} onClick={toggleOrdem} />
                   <ThOrdenavel label="Base" coluna="base" ordemAtual={ordemColuna} direcao={ordemDirecao} onClick={toggleOrdem} />
+                  <ThOrdenavel label="Gerência" coluna="gerencia" ordemAtual={ordemColuna} direcao={ordemDirecao} onClick={toggleOrdem} />
                   <ThOrdenavel label="Admissão" coluna="admissao" ordemAtual={ordemColuna} direcao={ordemDirecao} onClick={toggleOrdem} />
                   <th style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 700, color: '#333', whiteSpace: 'nowrap', position: 'sticky', top: 0, backgroundColor: '#fafafa', zIndex: 3 }}>E-mail</th>
                   <ThOrdenavel label="Situação" coluna="situacao" ordemAtual={ordemColuna} direcao={ordemDirecao} onClick={toggleOrdem} />
@@ -359,7 +396,7 @@ export default function ColaboradoresPage() {
               <tbody>
                 {ordenados.length === 0 ? (
                   <tr>
-                    <td colSpan={8} style={{ padding: '48px 16px', textAlign: 'center', color: '#aaa', fontSize: 14 }}>
+                    <td colSpan={9} style={{ padding: '48px 16px', textAlign: 'center', color: '#aaa', fontSize: 14 }}>
                       <p style={{ fontSize: 28, margin: '0 0 8px' }}>👤</p>
                       Nenhum colaborador encontrado.
                     </td>
@@ -372,6 +409,11 @@ export default function ColaboradoresPage() {
                       <td style={{ padding: '10px 16px', color: '#666' }}>{c.matricula}</td>
                       <td style={{ padding: '10px 16px', color: '#666', whiteSpace: 'nowrap' }}>{c.funcoes?.nome || '—'}</td>
                       <td style={{ padding: '10px 16px', color: '#666', whiteSpace: 'nowrap' }}>{c.bases?.nome || '—'}</td>
+                      <td style={{ padding: '10px 16px', color: '#666', whiteSpace: 'nowrap' }}>
+                        {c.gerencias?.sigla
+                          ? <span style={{ fontSize: 11, backgroundColor: '#fdf2f5', color: COR, padding: '2px 8px', borderRadius: 99, fontWeight: 600 }}>{c.gerencias.sigla}</span>
+                          : '—'}
+                      </td>
                       <td style={{ padding: '10px 16px', color: '#666', whiteSpace: 'nowrap' }}>
                         {c.data_admissao ? new Date(c.data_admissao + 'T12:00:00').toLocaleDateString('pt-BR') : '—'}
                       </td>
@@ -440,7 +482,7 @@ export default function ColaboradoresPage() {
       {/* MODAL EDITAR/NOVO */}
       {modalAberto && (
         <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100 }}>
-          <div style={{ backgroundColor: 'white', borderRadius: 16, padding: 32, width: '100%', maxWidth: 560, maxHeight: '90vh', overflowY: 'auto', boxShadow: '0 20px 60px rgba(0,0,0,0.2)' }}>
+          <div style={{ backgroundColor: 'white', borderRadius: 16, padding: 32, width: '100%', maxWidth: 580, maxHeight: '90vh', overflowY: 'auto', boxShadow: '0 20px 60px rgba(0,0,0,0.2)' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 24 }}>
               <div>
                 <h2 style={{ fontSize: 17, fontWeight: 600, margin: 0, color: '#1a1a1a' }}>{editando ? 'Editar Colaborador' : 'Novo Colaborador'}</h2>
@@ -477,6 +519,26 @@ export default function ColaboradoresPage() {
                   <option value="">Selecione...</option>
                   {bases.map(b => <option key={b.id} value={b.id}>{b.nome}</option>)}
                 </select>
+              </div>
+              <div style={{ gridColumn: '1 / -1' }}>
+                <label style={labelStyle}>Gerência</label>
+                <select value={form.gerencia_id} onChange={e => setForm({ ...form, gerencia_id: e.target.value })} style={inputStyle}>
+                  <option value="">Selecione...</option>
+                  {gerencias.map(g => <option key={g.id} value={g.id}>{g.sigla} — {g.nome}</option>)}
+                </select>
+                {gerenciaSelecionada?.colaboradores?.nome && (
+                  <p style={{ fontSize: 11, color: '#888', margin: '4px 0 0' }}>
+                    Gerente: {gerenciaSelecionada.colaboradores.nome}
+                  </p>
+                )}
+              </div>
+              <div>
+                <label style={labelStyle}>Contato (telefone)</label>
+                <input value={form.contato} onChange={e => setForm({ ...form, contato: e.target.value })} style={inputStyle} placeholder="(69) 99999-9999" />
+              </div>
+              <div>
+                <label style={labelStyle}>Processo / Centro de Custo</label>
+                <input value={form.processo} onChange={e => setForm({ ...form, processo: e.target.value })} style={inputStyle} placeholder="Ex: 001-2024" />
               </div>
               <div>
                 <label style={labelStyle}>Data de Admissão</label>

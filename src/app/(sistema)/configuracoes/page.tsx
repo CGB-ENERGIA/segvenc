@@ -16,6 +16,7 @@ interface Usuario {
   ativo: boolean
   created_at: string
   bases?: { base_id: number }[]
+  modulos_acesso?: string[]
 }
 
 interface Base {
@@ -43,7 +44,61 @@ interface RegraVencimento {
   alerta_previo_dias: number
 }
 
-type Aba = 'usuarios' | 'bases' | 'funcoes' | 'tipos_exame'
+interface Gerencia {
+  id: number
+  sigla: string
+  nome: string
+  gerente_matricula: string | null
+  colaboradores?: { nome: string; matricula: string } | null
+}
+
+interface ColaboradorBusca {
+  matricula: string
+  nome: string
+}
+
+interface GSE {
+  id: number
+  setor: string
+  gse_funcoes: { id: number }[]
+  gse_exames: { id: number }[]
+}
+
+interface GSEFuncao {
+  id: number
+  gse_id: number
+  funcao: string
+}
+
+interface TipoExameMedico {
+  id: number
+  nome: string
+}
+
+interface GSEExame {
+  id: number
+  gse_id: number
+  tipo_exame_medico_id: number
+  no_adm: boolean
+  no_per: boolean
+  no_ret: boolean
+  no_mro: boolean
+  no_dem: boolean
+  tipos_exame_medico?: { nome: string } | null
+}
+
+type Aba = 'usuarios' | 'bases' | 'funcoes' | 'tipos_exame' | 'gerencias' | 'gse'
+
+// ─── CONSTANTES ───────────────────────────────────────────────────────────────
+
+const MODULOS = [
+  { chave: 'painel', label: 'Painel Operacional' },
+  { chave: 'colaboradores', label: 'Colaboradores' },
+  { chave: 'matriz', label: 'Matriz de Competências' },
+  { chave: 'medicina', label: 'Medicina do Trabalho' },
+  { chave: 'auditoria', label: 'Auditoria' },
+  { chave: 'configuracoes', label: 'Configurações' },
+]
 
 // ─── ESTILOS BASE ─────────────────────────────────────────────────────────────
 
@@ -78,10 +133,11 @@ const labelStyle: React.CSSProperties = {
 
 // ─── MODAL GENÉRICO ───────────────────────────────────────────────────────────
 
-function Modal({ titulo, onFechar, children }: {
+function Modal({ titulo, onFechar, children, maxWidth }: {
   titulo: string
   onFechar: () => void
   children: React.ReactNode
+  maxWidth?: number
 }) {
   return (
     <div style={{
@@ -90,7 +146,7 @@ function Modal({ titulo, onFechar, children }: {
     }}>
       <div style={{
         backgroundColor: 'white', borderRadius: 16, padding: 32,
-        width: '100%', maxWidth: 520, maxHeight: '85vh', overflowY: 'auto',
+        width: '100%', maxWidth: maxWidth || 520, maxHeight: '85vh', overflowY: 'auto',
         boxShadow: '0 20px 60px rgba(0,0,0,0.15)',
       }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
@@ -115,7 +171,9 @@ function AbaUsuarios() {
   const [erro, setErro] = useState('')
   const [form, setForm] = useState({
     nome: '', email: '', nivel: 'operador',
-    pode_auditar: false, ativo: true, bases_ids: [] as number[],
+    pode_auditar: false, ativo: true,
+    bases_ids: [] as number[],
+    modulos_acesso: [] as string[],
   })
 
   useEffect(() => { carregar() }, [])
@@ -126,14 +184,14 @@ function AbaUsuarios() {
       .from('usuarios')
       .select('*, bases:usuarios_bases(base_id)')
       .order('nome')
-  const { data: b } = await supabase.from('bases').select('id, nome, empresa_id').order('nome')
+    const { data: b } = await supabase.from('bases').select('id, nome, empresa_id').order('nome')
     setUsuarios(u || [])
     setBases(b || [])
     setCarregando(false)
   }
 
   function abrirNovo() {
-    setForm({ nome: '', email: '', nivel: 'operador', pode_auditar: false, ativo: true, bases_ids: [] })
+    setForm({ nome: '', email: '', nivel: 'operador', pode_auditar: false, ativo: true, bases_ids: [], modulos_acesso: [] })
     setErro('')
     setModal('novo')
   }
@@ -147,50 +205,67 @@ function AbaUsuarios() {
       pode_auditar: u.pode_auditar,
       ativo: u.ativo,
       bases_ids: u.bases?.map(b => b.base_id) || [],
+      modulos_acesso: u.modulos_acesso || [],
     })
     setErro('')
     setModal('editar')
   }
 
-  async function salvarNovo() {
-  setSalvando(true)
-  setErro('')
-  try {
-    // 1. Criar usuário via API Route (server-side)
-    const res = await fetch('/api/criar-usuario', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: form.email, nome: form.nome }),
-    })
-    const json = await res.json()
-    if (!res.ok) throw new Error(json.error)
-    const userId = json.user.id
-
-    // 2. Inserir na tabela usuarios
-    const { error: dbError } = await supabase.from('usuarios').insert({
-      id: userId,
-      email: form.email,
-      nome: form.nome,
-      nivel: form.nivel,
-      pode_auditar: form.pode_auditar,
-      ativo: form.ativo,
-    })
-    if (dbError) throw new Error(dbError.message)
-
-    // 3. Associar bases
-    if (form.bases_ids.length > 0) {
-      await supabase.from('usuarios_bases').insert(
-        form.bases_ids.map(base_id => ({ usuario_id: userId, base_id }))
-      )
-    }
-
-    setModal(null)
-    carregar()
-  } catch (e: any) {
-    setErro(e.message || 'Erro ao criar usuário')
+  function toggleBase(id: number) {
+    setForm(f => ({
+      ...f,
+      bases_ids: f.bases_ids.includes(id)
+        ? f.bases_ids.filter(b => b !== id)
+        : [...f.bases_ids, id],
+    }))
   }
-  setSalvando(false)
-}
+
+  function toggleModulo(chave: string) {
+    setForm(f => ({
+      ...f,
+      modulos_acesso: f.modulos_acesso.includes(chave)
+        ? f.modulos_acesso.filter(m => m !== chave)
+        : [...f.modulos_acesso, chave],
+    }))
+  }
+
+  async function salvarNovo() {
+    setSalvando(true)
+    setErro('')
+    try {
+      const res = await fetch('/api/criar-usuario', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: form.email, nome: form.nome }),
+      })
+      const json = await res.json()
+      if (!res.ok) throw new Error(json.error)
+      const userId = json.user.id
+
+      const { error: dbError } = await supabase.from('usuarios').insert({
+        id: userId,
+        email: form.email,
+        nome: form.nome,
+        nivel: form.nivel,
+        pode_auditar: form.pode_auditar,
+        ativo: form.ativo,
+        modulos_acesso: form.modulos_acesso,
+      })
+      if (dbError) throw new Error(dbError.message)
+
+      if (form.bases_ids.length > 0) {
+        await supabase.from('usuarios_bases').insert(
+          form.bases_ids.map(base_id => ({ usuario_id: userId, base_id }))
+        )
+      }
+
+      setModal(null)
+      carregar()
+    } catch (e: any) {
+      setErro(e.message || 'Erro ao criar usuário')
+    }
+    setSalvando(false)
+  }
 
   async function salvarEdicao() {
     if (!usuarioSelecionado) return
@@ -202,10 +277,10 @@ function AbaUsuarios() {
         nivel: form.nivel,
         pode_auditar: form.pode_auditar,
         ativo: form.ativo,
+        modulos_acesso: form.modulos_acesso,
       }).eq('id', usuarioSelecionado.id)
       if (error) throw new Error(error.message)
 
-      // Atualizar bases
       await supabase.from('usuarios_bases').delete().eq('usuario_id', usuarioSelecionado.id)
       if (form.bases_ids.length > 0) {
         await supabase.from('usuarios_bases').insert(
@@ -224,15 +299,6 @@ function AbaUsuarios() {
   async function toggleAtivo(u: Usuario) {
     await supabase.from('usuarios').update({ ativo: !u.ativo }).eq('id', u.id)
     carregar()
-  }
-
-  function toggleBase(id: number) {
-    setForm(f => ({
-      ...f,
-      bases_ids: f.bases_ids.includes(id)
-        ? f.bases_ids.filter(b => b !== id)
-        : [...f.bases_ids, id],
-    }))
   }
 
   const nivelCor: Record<string, { bg: string; text: string }> = {
@@ -365,6 +431,34 @@ function AbaUsuarios() {
                     {b.nome}
                   </label>
                 ))}
+              </div>
+            </div>
+
+            <div>
+              <label style={labelStyle}>Módulos com acesso</label>
+              <div style={{
+                border: '1px solid #e0e0e0', borderRadius: 8, padding: 12,
+                display: 'flex', flexWrap: 'wrap', gap: 8,
+              }}>
+                {MODULOS
+                  .filter(m => m.chave !== 'configuracoes' || form.nivel === 'admin')
+                  .map(m => (
+                    <label key={m.chave} style={{
+                      display: 'flex', alignItems: 'center', gap: 6, fontSize: 12,
+                      color: '#555', cursor: 'pointer',
+                      backgroundColor: form.modulos_acesso.includes(m.chave) ? corClaro : '#f9f9f9',
+                      padding: '4px 10px', borderRadius: 99,
+                      border: `1px solid ${form.modulos_acesso.includes(m.chave) ? cor : '#e0e0e0'}`,
+                    }}>
+                      <input
+                        type="checkbox"
+                        checked={form.modulos_acesso.includes(m.chave)}
+                        onChange={() => toggleModulo(m.chave)}
+                        style={{ display: 'none' }}
+                      />
+                      {form.modulos_acesso.includes(m.chave) ? '☑' : '☐'} {m.label}
+                    </label>
+                  ))}
               </div>
             </div>
 
@@ -769,6 +863,483 @@ function AbaTiposExame() {
   )
 }
 
+// ─── ABA GERÊNCIAS ────────────────────────────────────────────────────────────
+
+function AbaGerencias() {
+  const [gerencias, setGerencias] = useState<Gerencia[]>([])
+  const [carregando, setCarregando] = useState(true)
+  const [modal, setModal] = useState<'novo' | 'editar' | null>(null)
+  const [selecionado, setSelecionado] = useState<Gerencia | null>(null)
+  const [salvando, setSalvando] = useState(false)
+  const [form, setForm] = useState({ sigla: '', nome: '', gerente_matricula: '' })
+  const [gerenteBusca, setGerenteBusca] = useState('')
+  const [gerenteSugestoes, setGerenteSugestoes] = useState<ColaboradorBusca[]>([])
+  const [showSugestoes, setShowSugestoes] = useState(false)
+
+  useEffect(() => { carregar() }, [])
+
+  async function carregar() {
+    setCarregando(true)
+    const { data } = await supabase
+      .from('gerencias')
+      .select('*, colaboradores(nome, matricula)')
+      .order('sigla')
+    setGerencias((data as unknown as Gerencia[]) || [])
+    setCarregando(false)
+  }
+
+  async function buscarGerentes(texto: string) {
+    if (texto.length < 2) { setGerenteSugestoes([]); setShowSugestoes(false); return }
+    const { data } = await supabase
+      .from('colaboradores')
+      .select('matricula, nome')
+      .or(`nome.ilike.%${texto}%,matricula.ilike.%${texto}%`)
+      .limit(10)
+    setGerenteSugestoes(data || [])
+    setShowSugestoes(true)
+  }
+
+  function selecionarGerente(c: ColaboradorBusca) {
+    setForm(f => ({ ...f, gerente_matricula: c.matricula }))
+    setGerenteBusca(`${c.nome} (${c.matricula})`)
+    setShowSugestoes(false)
+    setGerenteSugestoes([])
+  }
+
+  function abrirNovo() {
+    setForm({ sigla: '', nome: '', gerente_matricula: '' })
+    setGerenteBusca('')
+    setModal('novo')
+  }
+
+  function abrirEditar(g: Gerencia) {
+    setSelecionado(g)
+    setForm({ sigla: g.sigla, nome: g.nome, gerente_matricula: g.gerente_matricula || '' })
+    setGerenteBusca(g.colaboradores ? `${g.colaboradores.nome} (${g.colaboradores.matricula})` : '')
+    setModal('editar')
+  }
+
+  async function salvar() {
+    if (!form.sigla) return
+    setSalvando(true)
+    const payload = {
+      sigla: form.sigla.toUpperCase(),
+      nome: form.nome,
+      gerente_matricula: form.gerente_matricula || null,
+    }
+    if (modal === 'novo') {
+      await supabase.from('gerencias').insert(payload)
+    } else if (selecionado) {
+      await supabase.from('gerencias').update(payload).eq('id', selecionado.id)
+    }
+    setSalvando(false)
+    setModal(null)
+    carregar()
+  }
+
+  async function excluir(id: number) {
+    if (!confirm('Excluir esta gerência?')) return
+    await supabase.from('gerencias').delete().eq('id', id)
+    carregar()
+  }
+
+  return (
+    <div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+        <p style={{ fontSize: 13, color: '#888', margin: 0 }}>{gerencias.length} gerências cadastradas</p>
+        <button style={btnPrimario} onClick={abrirNovo}>+ Nova Gerência</button>
+      </div>
+
+      {carregando ? <p style={{ color: '#888', fontSize: 14 }}>Carregando...</p> : (
+        <div style={{ borderRadius: 12, border: '1px solid #f0f0f0', overflow: 'hidden' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', backgroundColor: 'white', fontSize: 13 }}>
+            <thead>
+              <tr style={{ backgroundColor: '#fafafa', borderBottom: '1px solid #f0f0f0' }}>
+                <th style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 500, color: '#555' }}>Sigla</th>
+                <th style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 500, color: '#555' }}>Nome</th>
+                <th style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 500, color: '#555' }}>Gerente</th>
+                <th style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 500, color: '#555' }}>Ações</th>
+              </tr>
+            </thead>
+            <tbody>
+              {gerencias.length === 0 ? (
+                <tr>
+                  <td colSpan={4} style={{ padding: '32px 16px', textAlign: 'center', color: '#aaa', fontSize: 13 }}>
+                    Nenhuma gerência cadastrada.
+                  </td>
+                </tr>
+              ) : gerencias.map((g, i) => (
+                <tr key={g.id} style={{ borderBottom: '1px solid #f5f5f5', backgroundColor: i % 2 === 0 ? 'white' : '#fafafa' }}>
+                  <td style={{ padding: '10px 16px', fontWeight: 600, color: cor }}>{g.sigla}</td>
+                  <td style={{ padding: '10px 16px', color: '#333' }}>{g.nome}</td>
+                  <td style={{ padding: '10px 16px', color: '#666' }}>
+                    {g.colaboradores?.nome || <span style={{ color: '#ccc' }}>—</span>}
+                  </td>
+                  <td style={{ padding: '10px 16px' }}>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <button style={btnSecundario} onClick={() => abrirEditar(g)}>Editar</button>
+                      <button style={btnPerigo} onClick={() => excluir(g.id)}>Excluir</button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {(modal === 'novo' || modal === 'editar') && (
+        <Modal titulo={modal === 'novo' ? 'Nova Gerência' : 'Editar Gerência'} onFechar={() => setModal(null)}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '120px 1fr', gap: 16 }}>
+              <div>
+                <label style={labelStyle}>Sigla *</label>
+                <input
+                  style={inputStyle}
+                  value={form.sigla}
+                  onChange={e => setForm(f => ({ ...f, sigla: e.target.value }))}
+                  placeholder="Ex: GT"
+                  maxLength={10}
+                />
+              </div>
+              <div>
+                <label style={labelStyle}>Nome completo</label>
+                <input
+                  style={inputStyle}
+                  value={form.nome}
+                  onChange={e => setForm(f => ({ ...f, nome: e.target.value }))}
+                  placeholder="Ex: Gerência de Transportes"
+                />
+              </div>
+            </div>
+
+            <div style={{ position: 'relative' }}>
+              <label style={labelStyle}>Gerente (busca por nome ou matrícula)</label>
+              <div style={{ position: 'relative' }}>
+                <input
+                  style={inputStyle}
+                  value={gerenteBusca}
+                  onChange={e => { setGerenteBusca(e.target.value); buscarGerentes(e.target.value) }}
+                  onFocus={() => gerenteBusca.length >= 2 && setShowSugestoes(true)}
+                  onBlur={() => setTimeout(() => setShowSugestoes(false), 150)}
+                  placeholder="Digite o nome ou matrícula..."
+                />
+                {form.gerente_matricula && (
+                  <button
+                    onClick={() => { setForm(f => ({ ...f, gerente_matricula: '' })); setGerenteBusca('') }}
+                    style={{
+                      position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)',
+                      background: 'none', border: 'none', cursor: 'pointer', color: '#aaa', fontSize: 16,
+                    }}
+                  >✕</button>
+                )}
+              </div>
+              {showSugestoes && gerenteSugestoes.length > 0 && (
+                <div style={{
+                  position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 50,
+                  backgroundColor: 'white', border: '1px solid #e0e0e0', borderRadius: 8,
+                  boxShadow: '0 4px 12px rgba(0,0,0,0.1)', maxHeight: 200, overflowY: 'auto',
+                }}>
+                  {gerenteSugestoes.map(c => (
+                    <div
+                      key={c.matricula}
+                      onClick={() => selecionarGerente(c)}
+                      style={{ padding: '8px 12px', cursor: 'pointer', fontSize: 13, borderBottom: '1px solid #f5f5f5' }}
+                      onMouseEnter={e => (e.currentTarget.style.backgroundColor = corClaro)}
+                      onMouseLeave={e => (e.currentTarget.style.backgroundColor = 'white')}
+                    >
+                      <span style={{ fontWeight: 500 }}>{c.nome}</span>
+                      <span style={{ color: '#888', marginLeft: 8 }}>({c.matricula})</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end', marginTop: 8 }}>
+              <button style={btnSecundario} onClick={() => setModal(null)}>Cancelar</button>
+              <button style={{ ...btnPrimario, opacity: salvando ? 0.7 : 1 }} onClick={salvar} disabled={salvando}>
+                {salvando ? 'Salvando...' : 'Salvar'}
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+    </div>
+  )
+}
+
+// ─── ABA GSE ──────────────────────────────────────────────────────────────────
+
+function AbaGSE() {
+  const [gses, setGses] = useState<GSE[]>([])
+  const [carregando, setCarregando] = useState(true)
+  const [gseSelecionado, setGseSelecionado] = useState<GSE | null>(null)
+  const [gseFuncoes, setGseFuncoes] = useState<GSEFuncao[]>([])
+  const [gseExames, setGseExames] = useState<GSEExame[]>([])
+  const [tiposExame, setTiposExame] = useState<TipoExameMedico[]>([])
+  const [novaFuncao, setNovaFuncao] = useState('')
+  const [adicionandoFuncao, setAdicionandoFuncao] = useState(false)
+  const [novoExameId, setNovoExameId] = useState('')
+  const [adicionandoExame, setAdicionandoExame] = useState(false)
+  const [atualizandoExame, setAtualizandoExame] = useState<number | null>(null)
+
+  useEffect(() => { carregarGSEs() }, [])
+
+  async function carregarGSEs() {
+    setCarregando(true)
+    const { data } = await supabase
+      .from('gses')
+      .select('id, setor, gse_funcoes(id), gse_exames(id)')
+      .order('setor')
+    setGses((data as unknown as GSE[]) || [])
+    setCarregando(false)
+  }
+
+  async function abrirGSE(gse: GSE) {
+    setGseSelecionado(gse)
+    const [{ data: funcoes }, { data: exames }, { data: tipos }] = await Promise.all([
+      supabase.from('gse_funcoes').select('*').eq('gse_id', gse.id).order('funcao'),
+      supabase.from('gse_exames').select('*, tipos_exame_medico(nome)').eq('gse_id', gse.id),
+      supabase.from('tipos_exame_medico').select('*').order('nome'),
+    ])
+    setGseFuncoes(funcoes || [])
+    setGseExames((exames as unknown as GSEExame[]) || [])
+    setTiposExame(tipos || [])
+    setNovaFuncao('')
+    setNovoExameId('')
+  }
+
+  async function adicionarFuncao() {
+    if (!novaFuncao.trim() || !gseSelecionado) return
+    setAdicionandoFuncao(true)
+    await supabase.from('gse_funcoes').insert({ gse_id: gseSelecionado.id, funcao: novaFuncao.trim() })
+    const { data } = await supabase.from('gse_funcoes').select('*').eq('gse_id', gseSelecionado.id).order('funcao')
+    setGseFuncoes(data || [])
+    setNovaFuncao('')
+    setAdicionandoFuncao(false)
+    carregarGSEs()
+  }
+
+  async function removerFuncao(id: number) {
+    await supabase.from('gse_funcoes').delete().eq('id', id)
+    setGseFuncoes(f => f.filter(x => x.id !== id))
+    carregarGSEs()
+  }
+
+  async function adicionarExame() {
+    if (!novoExameId || !gseSelecionado) return
+    setAdicionandoExame(true)
+    await supabase.from('gse_exames').insert({
+      gse_id: gseSelecionado.id,
+      tipo_exame_medico_id: parseInt(novoExameId),
+      no_adm: false, no_per: false, no_ret: false, no_mro: false, no_dem: false,
+    })
+    const { data } = await supabase.from('gse_exames').select('*, tipos_exame_medico(nome)').eq('gse_id', gseSelecionado.id)
+    setGseExames((data as unknown as GSEExame[]) || [])
+    setNovoExameId('')
+    setAdicionandoExame(false)
+    carregarGSEs()
+  }
+
+  async function removerExame(id: number) {
+    await supabase.from('gse_exames').delete().eq('id', id)
+    setGseExames(e => e.filter(x => x.id !== id))
+    carregarGSEs()
+  }
+
+  async function toggleCheckbox(exame: GSEExame, campo: 'no_adm' | 'no_per' | 'no_ret' | 'no_mro' | 'no_dem') {
+    const novoValor = !exame[campo]
+    setAtualizandoExame(exame.id)
+    await supabase.from('gse_exames').update({ [campo]: novoValor }).eq('id', exame.id)
+    setGseExames(e => e.map(x => x.id === exame.id ? { ...x, [campo]: novoValor } : x))
+    setAtualizandoExame(null)
+  }
+
+  const examesJaVinculados = new Set(gseExames.map(e => e.tipo_exame_medico_id))
+  const tiposDisponiveis = tiposExame.filter(t => !examesJaVinculados.has(t.id))
+
+  const thExameStyle: React.CSSProperties = {
+    padding: '8px 12px', textAlign: 'center' as const, fontWeight: 500, color: '#555', fontSize: 12,
+    backgroundColor: '#fafafa', borderBottom: '1px solid #f0f0f0',
+  }
+
+  return (
+    <div>
+      <div style={{ marginBottom: 20 }}>
+        <p style={{ fontSize: 13, color: '#888', margin: 0 }}>{gses.length} GSEs cadastrados</p>
+      </div>
+
+      {carregando ? <p style={{ color: '#888', fontSize: 14 }}>Carregando...</p> : (
+        <div style={{ borderRadius: 12, border: '1px solid #f0f0f0', overflow: 'hidden' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', backgroundColor: 'white', fontSize: 13 }}>
+            <thead>
+              <tr style={{ backgroundColor: '#fafafa', borderBottom: '1px solid #f0f0f0' }}>
+                <th style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 500, color: '#555' }}>ID</th>
+                <th style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 500, color: '#555' }}>Setor</th>
+                <th style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 500, color: '#555' }}>Funções</th>
+                <th style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 500, color: '#555' }}>Exames</th>
+                <th style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 500, color: '#555' }}>Ações</th>
+              </tr>
+            </thead>
+            <tbody>
+              {gses.length === 0 ? (
+                <tr>
+                  <td colSpan={5} style={{ padding: '32px 16px', textAlign: 'center', color: '#aaa', fontSize: 13 }}>
+                    Nenhum GSE cadastrado.
+                  </td>
+                </tr>
+              ) : gses.map((g, i) => (
+                <tr key={g.id} style={{ borderBottom: '1px solid #f5f5f5', backgroundColor: i % 2 === 0 ? 'white' : '#fafafa' }}>
+                  <td style={{ padding: '10px 16px', color: '#aaa', fontSize: 12 }}>{g.id}</td>
+                  <td style={{ padding: '10px 16px', fontWeight: 500, color: '#333' }}>{g.setor}</td>
+                  <td style={{ padding: '10px 16px' }}>
+                    <span style={{ backgroundColor: '#eff6ff', color: '#2563eb', fontSize: 12, padding: '2px 8px', borderRadius: 99 }}>
+                      {g.gse_funcoes.length}
+                    </span>
+                  </td>
+                  <td style={{ padding: '10px 16px' }}>
+                    <span style={{ backgroundColor: '#f0fdf4', color: '#16a34a', fontSize: 12, padding: '2px 8px', borderRadius: 99 }}>
+                      {g.gse_exames.length}
+                    </span>
+                  </td>
+                  <td style={{ padding: '10px 16px' }}>
+                    <button style={btnSecundario} onClick={() => abrirGSE(g)}>Gerenciar</button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {gseSelecionado && (
+        <Modal
+          titulo={`GSE ${gseSelecionado.id} — ${gseSelecionado.setor}`}
+          onFechar={() => setGseSelecionado(null)}
+          maxWidth={720}
+        >
+          {/* SEÇÃO 1: FUNÇÕES */}
+          <div style={{ marginBottom: 32 }}>
+            <h3 style={{ fontSize: 14, fontWeight: 600, color: '#333', margin: '0 0 12px', paddingBottom: 8, borderBottom: '1px solid #f0f0f0' }}>
+              Funções vinculadas ao GSE
+            </h3>
+            {gseFuncoes.length === 0 ? (
+              <p style={{ fontSize: 13, color: '#aaa', margin: '0 0 12px' }}>Nenhuma função vinculada.</p>
+            ) : (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
+                {gseFuncoes.map(f => (
+                  <div key={f.id} style={{
+                    display: 'flex', alignItems: 'center', gap: 6,
+                    backgroundColor: '#f9f9f9', border: '1px solid #e0e0e0',
+                    borderRadius: 99, padding: '4px 10px', fontSize: 12,
+                  }}>
+                    <span style={{ color: '#333' }}>{f.funcao}</span>
+                    <button
+                      onClick={() => removerFuncao(f.id)}
+                      style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#aaa', fontSize: 14, padding: 0, lineHeight: 1 }}
+                    >✕</button>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div style={{ display: 'flex', gap: 8 }}>
+              <input
+                style={{ ...inputStyle, flex: 1 }}
+                value={novaFuncao}
+                onChange={e => setNovaFuncao(e.target.value)}
+                placeholder="Nome da nova função..."
+                onKeyDown={e => e.key === 'Enter' && adicionarFuncao()}
+              />
+              <button
+                style={{ ...btnPrimario, opacity: adicionandoFuncao ? 0.7 : 1, whiteSpace: 'nowrap' }}
+                onClick={adicionarFuncao}
+                disabled={adicionandoFuncao}
+              >
+                Adicionar
+              </button>
+            </div>
+          </div>
+
+          {/* SEÇÃO 2: EXAMES */}
+          <div>
+            <h3 style={{ fontSize: 14, fontWeight: 600, color: '#333', margin: '0 0 12px', paddingBottom: 8, borderBottom: '1px solid #f0f0f0' }}>
+              Exames por tipo de ASO
+            </h3>
+            {gseExames.length === 0 ? (
+              <p style={{ fontSize: 13, color: '#aaa', margin: '0 0 12px' }}>Nenhum exame vinculado.</p>
+            ) : (
+              <div style={{ overflowX: 'auto', marginBottom: 16 }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, border: '1px solid #f0f0f0', borderRadius: 8 }}>
+                  <thead>
+                    <tr>
+                      <th style={{ ...thExameStyle, textAlign: 'left', padding: '8px 12px' }}>Exame</th>
+                      <th style={thExameStyle}>ADM</th>
+                      <th style={thExameStyle}>PER</th>
+                      <th style={thExameStyle}>RET</th>
+                      <th style={thExameStyle}>MRO</th>
+                      <th style={thExameStyle}>DEM</th>
+                      <th style={{ ...thExameStyle, width: 36 }}></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {gseExames.map((e, i) => {
+                      const desabilitado = atualizandoExame === e.id
+                      return (
+                        <tr key={e.id} style={{ borderBottom: '1px solid #f5f5f5', backgroundColor: i % 2 === 0 ? 'white' : '#fafafa', opacity: desabilitado ? 0.6 : 1 }}>
+                          <td style={{ padding: '8px 12px', color: '#333' }}>{e.tipos_exame_medico?.nome || '—'}</td>
+                          {(['no_adm', 'no_per', 'no_ret', 'no_mro', 'no_dem'] as const).map(campo => (
+                            <td key={campo} style={{ padding: '8px 12px', textAlign: 'center' }}>
+                              <input
+                                type="checkbox"
+                                checked={e[campo]}
+                                onChange={() => toggleCheckbox(e, campo)}
+                                disabled={desabilitado}
+                                style={{ width: 16, height: 16, cursor: 'pointer', accentColor: cor }}
+                              />
+                            </td>
+                          ))}
+                          <td style={{ padding: '8px 12px', textAlign: 'center' }}>
+                            <button
+                              onClick={() => removerExame(e.id)}
+                              style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#ccc', fontSize: 14 }}
+                              onMouseEnter={ev => (ev.currentTarget.style.color = '#dc2626')}
+                              onMouseLeave={ev => (ev.currentTarget.style.color = '#ccc')}
+                            >✕</button>
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            {tiposDisponiveis.length > 0 && (
+              <div style={{ display: 'flex', gap: 8 }}>
+                <select
+                  style={{ ...inputStyle, flex: 1 }}
+                  value={novoExameId}
+                  onChange={e => setNovoExameId(e.target.value)}
+                >
+                  <option value="">Selecione um exame para adicionar...</option>
+                  {tiposDisponiveis.map(t => <option key={t.id} value={t.id}>{t.nome}</option>)}
+                </select>
+                <button
+                  style={{ ...btnPrimario, opacity: (adicionandoExame || !novoExameId) ? 0.7 : 1, whiteSpace: 'nowrap' }}
+                  onClick={adicionarExame}
+                  disabled={adicionandoExame || !novoExameId}
+                >
+                  Adicionar
+                </button>
+              </div>
+            )}
+          </div>
+        </Modal>
+      )}
+    </div>
+  )
+}
+
 // ─── PÁGINA PRINCIPAL ─────────────────────────────────────────────────────────
 
 export default function ConfiguracoesPage() {
@@ -784,7 +1355,6 @@ export default function ConfiguracoesPage() {
     verificar()
   }, [])
 
-  // Bloquear acesso se não for admin
   if (usuario && usuario.nivel !== 'admin') {
     return (
       <div style={{ textAlign: 'center', padding: '80px 0' }}>
@@ -800,13 +1370,14 @@ export default function ConfiguracoesPage() {
     { key: 'bases', label: 'Bases', descricao: 'Cadastre e edite as bases operacionais' },
     { key: 'funcoes', label: 'Funções', descricao: 'Funções dos colaboradores' },
     { key: 'tipos_exame', label: 'Tipos de Exame', descricao: 'Exames e treinamentos com regras de vencimento' },
+    { key: 'gerencias', label: 'Gerências', descricao: 'Gerências e seus responsáveis' },
+    { key: 'gse', label: 'GSE', descricao: 'Grupos Similares de Exposição — funções e exames por tipo de ASO' },
   ]
 
   const abaInfo = abas.find(a => a.key === abaAtiva)!
 
   return (
     <div style={{ fontFamily: 'Arial, sans-serif' }}>
-      {/* CABEÇALHO */}
       <h1 style={{ fontSize: 22, fontWeight: 500, color: '#1a1a1a', marginBottom: 4 }}>
         Configurações
       </h1>
@@ -814,8 +1385,7 @@ export default function ConfiguracoesPage() {
         {abaInfo.descricao}
       </p>
 
-      {/* ABAS */}
-      <div style={{ display: 'flex', gap: 4, marginBottom: 28, borderBottom: '1px solid #f0f0f0' }}>
+      <div style={{ display: 'flex', gap: 4, marginBottom: 28, borderBottom: '1px solid #f0f0f0', flexWrap: 'wrap' }}>
         {abas.map(aba => (
           <button
             key={aba.key}
@@ -834,11 +1404,12 @@ export default function ConfiguracoesPage() {
         ))}
       </div>
 
-      {/* CONTEÚDO */}
       {abaAtiva === 'usuarios' && <AbaUsuarios />}
       {abaAtiva === 'bases' && <AbaBases />}
       {abaAtiva === 'funcoes' && <AbaFuncoes />}
       {abaAtiva === 'tipos_exame' && <AbaTiposExame />}
+      {abaAtiva === 'gerencias' && <AbaGerencias />}
+      {abaAtiva === 'gse' && <AbaGSE />}
     </div>
   )
 }
