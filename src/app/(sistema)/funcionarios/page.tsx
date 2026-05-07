@@ -457,10 +457,10 @@ function SeletorColunas({ colunas, visiveis, onChange }: {
 
 // ─── MODAL EXAME ──────────────────────────────────────────────────────────────
 
-function ModalExame({ dados, abaInicial, onFechar, onAtualizar, usuarioEmail, podeAuditar }: {
+function ModalExame({ dados, abaInicial, onFechar, onAtualizar, usuarioEmail, podeAuditar, nivelUsuario }: {
   dados: { colaborador: Colaborador; registro: Registro | undefined; treinamento: string; treinamentoId: number }
   abaInicial: AbaModal; onFechar: () => void; onAtualizar: () => void
-  usuarioEmail: string; podeAuditar: boolean
+  usuarioEmail: string; podeAuditar: boolean; nivelUsuario: string
 }) {
   const [aba, setAba] = useState<AbaModal>(abaInicial)
   const [programacoes, setProgramacoes] = useState<Programacao[]>([])
@@ -474,6 +474,10 @@ function ModalExame({ dados, abaInicial, onFechar, onAtualizar, usuarioEmail, po
   const [formAuditoria, setFormAuditoria] = useState({ validado: true, observacao: '' })
   const [salvandoAud, setSalvandoAud] = useState(false)
   const [erroAud, setErroAud] = useState('')
+  const [modalExcluir, setModalExcluir] = useState(false)
+  const [confirmacaoNome, setConfirmacaoNome] = useState('')
+  const [excluindo, setExcluindo] = useState(false)
+  const [erroExcluir, setErroExcluir] = useState('')
   const fileInputRef = useRef<HTMLInputElement>(null)
   const { colaborador, registro, treinamento, treinamentoId } = dados
 
@@ -515,6 +519,15 @@ function ModalExame({ dados, abaInicial, onFechar, onAtualizar, usuarioEmail, po
     const { error } = await supabase.from('logs_auditoria').insert({ registro_id: registro.id, auditor_email: usuarioEmail, validado: formAuditoria.validado, observacao: formAuditoria.observacao || null, data_auditoria: new Date().toISOString() })
     if (error) { setErroAud(error.message); setSalvandoAud(false); return }
     setSalvandoAud(false); onAtualizar(); onFechar()
+  }
+
+  async function excluirExame() {
+    if (!registro) return
+    if (confirmacaoNome !== treinamento) { setErroExcluir('O nome digitado não confere. Tente novamente.'); return }
+    setExcluindo(true); setErroExcluir('')
+    const { error } = await supabase.from('registros_exames').delete().eq('id', registro.id)
+    if (error) { setErroExcluir(error.message); setExcluindo(false); return }
+    onAtualizar(); onFechar()
   }
 
   const auditorias = [...(registro?.logs_auditoria || [])].sort((a, b) => new Date(b.data_auditoria).getTime() - new Date(a.data_auditoria).getTime())
@@ -578,6 +591,41 @@ function ModalExame({ dados, abaInicial, onFechar, onAtualizar, usuarioEmail, po
                   <p style={{ fontSize: 14 }}>Nenhum registro encontrado para este exame.</p>
                 </div>
               )}
+              {registro && nivelUsuario === 'admin' && (
+                <div style={{ marginTop: 24, paddingTop: 20, borderTop: '1px solid #f0f0f0' }}>
+                  <button onClick={() => { setConfirmacaoNome(''); setErroExcluir(''); setModalExcluir(true) }} style={{ height: 36, padding: '0 16px', fontSize: 12, border: '1px solid #fca5a5', borderRadius: 8, backgroundColor: '#fef2f2', color: '#dc2626', cursor: 'pointer' }}>
+                    Excluir este exame
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+          {modalExcluir && (
+            <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 200 }}>
+              <div style={{ backgroundColor: 'white', borderRadius: 16, padding: 28, width: '100%', maxWidth: 440, boxShadow: '0 20px 60px rgba(0,0,0,0.25)' }}>
+                <h3 style={{ fontSize: 16, fontWeight: 600, color: '#dc2626', margin: '0 0 8px' }}>Excluir exame</h3>
+                <p style={{ fontSize: 13, color: '#555', margin: '0 0 16px', lineHeight: 1.5 }}>
+                  Esta ação é <strong>irreversível</strong>. Serão removidos o registro, os logs de auditoria e as programações associadas.<br /><br />
+                  Para confirmar, digite o nome do treinamento:
+                </p>
+                <p style={{ fontSize: 13, fontWeight: 600, color: '#333', margin: '0 0 8px', padding: '8px 12px', backgroundColor: '#f9f9f9', borderRadius: 8, borderLeft: '3px solid #dc2626' }}>{treinamento}</p>
+                <input
+                  type="text"
+                  autoFocus
+                  value={confirmacaoNome}
+                  onChange={e => setConfirmacaoNome(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && excluirExame()}
+                  placeholder="Digite o nome exato..."
+                  style={{ width: '100%', height: 38, border: '1px solid #e0e0e0', borderRadius: 8, padding: '0 12px', fontSize: 13, boxSizing: 'border-box', outline: 'none', marginBottom: 8 }}
+                />
+                {erroExcluir && <p style={{ fontSize: 12, color: '#dc2626', margin: '0 0 12px' }}>{erroExcluir}</p>}
+                <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 12 }}>
+                  <button onClick={() => setModalExcluir(false)} disabled={excluindo} style={{ height: 38, padding: '0 18px', border: '1px solid #e0e0e0', borderRadius: 8, fontSize: 13, cursor: 'pointer', background: 'white', color: '#555' }}>Cancelar</button>
+                  <button onClick={excluirExame} disabled={excluindo || confirmacaoNome !== treinamento} style={{ height: 38, padding: '0 22px', backgroundColor: '#dc2626', color: 'white', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 500, cursor: excluindo || confirmacaoNome !== treinamento ? 'not-allowed' : 'pointer', opacity: excluindo || confirmacaoNome !== treinamento ? 0.5 : 1 }}>
+                    {excluindo ? 'Excluindo...' : 'Confirmar exclusão'}
+                  </button>
+                </div>
+              </div>
             </div>
           )}
           {aba === 'documento' && (
@@ -713,6 +761,7 @@ export default function FuncionariosPage() {
     treinamento: string; treinamentoId: number; abaInicial: AbaModal
   } | null>(null)
   const [modalNovoExame, setModalNovoExame] = useState<Colaborador | null>(null)
+  const [filtroStatus, setFiltroStatus] = useState<'valido' | 'proximo' | 'vencido' | null>(null)
 
   useEffect(() => {
     async function init() {
@@ -777,10 +826,11 @@ export default function FuncionariosPage() {
     else { setOrdemColuna(coluna); setOrdemDirecao('asc') }
   }
 
-  function limparFiltros() {
-    setFiltroBusca(''); setFiltroFuncoes([]); setFiltroBase('')
-    setFiltroSituacao('ATIVO'); setFiltroAdmissaoInput(''); setFiltroExameInput('')
-  }
+function limparFiltros() {
+  setFiltroBusca(''); setFiltroFuncoes([]); setFiltroBase('')
+  setFiltroSituacao('ATIVO'); setFiltroAdmissaoInput(''); setFiltroExameInput('')
+  setFiltroStatus(null)
+}
 
   function handleExportar(tipo: 'csv' | 'xlsx') {
     const dados = gerarDadosExportacao(ordenados, treinamentos)
@@ -795,6 +845,10 @@ export default function FuncionariosPage() {
     if (filtroFuncoes.length > 0 && !filtroFuncoes.includes(c.funcoes?.nome || '')) return false
     if (filtroAdmissaoMes && filtroAdmissaoAno && c.data_admissao) { const d = new Date(c.data_admissao); if (d.getMonth() + 1 !== parseInt(filtroAdmissaoMes) || d.getFullYear() !== parseInt(filtroAdmissaoAno)) return false }
     if (filtroExameMes && filtroExameAno) { const mes = parseInt(filtroExameMes), ano = parseInt(filtroExameAno); if (!(c.registros_exames || []).some(r => { const d = new Date(r.data_vencimento); return d.getMonth() + 1 === mes && d.getFullYear() === ano })) return false }
+    if (filtroStatus) {
+    const temExameNoStatus = (c.registros_exames || []).some(r => getStatusVencimento(r.data_vencimento) === filtroStatus)
+    if (!temExameNoStatus) return false
+  }
     return true
   })
 
@@ -809,8 +863,15 @@ export default function FuncionariosPage() {
     return ordemDirecao === 'asc' ? vA.localeCompare(vB) : vB.localeCompare(vA)
   })
 
-  const stats = calcularStats(filtrados)
-  const temFiltroAtivo = !!(filtroBusca || filtroFuncoes.length > 0 || filtroAdmissaoInput || filtroExameInput)
+  const filtradosSemStatus = colaboradores.filter(c => {
+  if (filtroBusca) { const b = filtroBusca.toLowerCase(); if (!c.nome.toLowerCase().includes(b) && !c.matricula.includes(filtroBusca)) return false }
+  if (filtroFuncoes.length > 0 && !filtroFuncoes.includes(c.funcoes?.nome || '')) return false
+  if (filtroAdmissaoMes && filtroAdmissaoAno && c.data_admissao) { const d = new Date(c.data_admissao); if (d.getMonth() + 1 !== parseInt(filtroAdmissaoMes) || d.getFullYear() !== parseInt(filtroAdmissaoAno)) return false }
+  if (filtroExameMes && filtroExameAno) { const mes = parseInt(filtroExameMes), ano = parseInt(filtroExameAno); if (!(c.registros_exames || []).some(r => { const d = new Date(r.data_vencimento); return d.getMonth() + 1 === mes && d.getFullYear() === ano })) return false }
+  return true
+})
+const stats = calcularStats(filtradosSemStatus)
+ const temFiltroAtivo = !!(filtroBusca || filtroFuncoes.length > 0 || filtroAdmissaoInput || filtroExameInput || filtroStatus)
   const vis = (key: string) => colunasVisiveis.includes(key)
 
   const todasColunasDef = [
@@ -847,16 +908,38 @@ export default function FuncionariosPage() {
       ) : (
         <div style={{ display: 'flex', gap: 12, marginBottom: 12, overflowX: 'auto', paddingBottom: 4 }}>
           {[
-            { label: 'Colaboradores', valor: filtrados.length, cor: '#4a4a49' },
-            { label: 'Exames Válidos', valor: stats.examesValidos, cor: '#16a34a' },
-            { label: 'Próximos do Vencimento', valor: stats.proximosVencimento, cor: '#d97706' },
-            { label: 'Vencidos', valor: stats.vencidos, cor: '#dc2626' },
-          ].map((card, i) => (
-            <div key={i} style={{ backgroundColor: 'white', borderRadius: 10, padding: '10px 16px', border: '1px solid #f0f0f0', minWidth: 160, flex: '1 0 160px' }}>
-              <p style={{ fontSize: 11, color: '#888', margin: '0 0 4px' }}>{card.label}</p>
-              <p style={{ fontSize: 24, fontWeight: 600, color: card.cor, margin: 0 }}>{card.valor.toLocaleString('pt-BR')}</p>
-            </div>
-          ))}
+        { label: 'Colaboradores', valor: filtrados.length, cor: '#4a4a49', status: null },
+{ label: 'Exames Válidos', valor: stats.examesValidos, cor: '#16a34a', status: 'valido' as const },
+{ label: 'Próximos do Vencimento', valor: stats.proximosVencimento, cor: '#d97706', status: 'proximo' as const },
+{ label: 'Vencidos', valor: stats.vencidos, cor: '#dc2626', status: 'vencido' as const },
+        ].map((card, i) => {
+  const ativo = filtroStatus === card.status && card.status !== null
+  return (
+    <div
+      key={i}
+      onClick={() => card.status !== null && setFiltroStatus(ativo ? null : card.status)}
+      style={{
+        backgroundColor: ativo ? card.cor + '10' : 'white',
+        borderRadius: 10,
+        padding: '10px 16px',
+        border: ativo ? `2px solid ${card.cor}` : '1px solid #f0f0f0',
+        minWidth: 160,
+        flex: '1 0 160px',
+        cursor: card.status !== null ? 'pointer' : 'default',
+        transition: 'all 0.15s ease',
+        boxShadow: ativo ? `0 2px 8px ${card.cor}30` : 'none',
+      }}
+    >
+      <p style={{ fontSize: 11, color: '#888', margin: '0 0 4px' }}>
+        {card.label}
+        {ativo && <span style={{ marginLeft: 6, fontSize: 10, color: card.cor }}>● filtrado</span>}
+      </p>
+      <p style={{ fontSize: 24, fontWeight: 600, color: card.cor, margin: 0 }}>
+        {card.valor.toLocaleString('pt-BR')}
+      </p>
+    </div>
+  )
+})}
         </div>
       )}
 
@@ -944,7 +1027,7 @@ export default function FuncionariosPage() {
         </div>
       )}
 
-      {modalDados && <ModalExame dados={modalDados} abaInicial={modalDados.abaInicial} onFechar={() => setModalDados(null)} onAtualizar={buscarColaboradores} usuarioEmail={usuario?.email || ''} podeAuditar={usuario?.pode_auditar || false} />}
+      {modalDados && <ModalExame dados={modalDados} abaInicial={modalDados.abaInicial} onFechar={() => setModalDados(null)} onAtualizar={buscarColaboradores} usuarioEmail={usuario?.email || ''} podeAuditar={usuario?.pode_auditar || false} nivelUsuario={usuario?.nivel || 'visualizador'} />}
       {modalNovoExame && <ModalNovoExame colaborador={modalNovoExame} treinamentos={treinamentos} onFechar={() => setModalNovoExame(null)} onAtualizar={buscarColaboradores} usuarioEmail={usuario?.email || ''} />}
     </div>
   )
