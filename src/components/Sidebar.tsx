@@ -7,11 +7,12 @@ import { useAuth } from '@/lib/auth-context'
 const COR = '#9f183c'
 
 const ICONES: Record<string, string> = {
-  '/dashboard':     'M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z M9 22V12h6v10',
-  '/funcionarios':  'M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z M14 2v6h6 M16 13H8 M16 17H8 M10 9H8',
-  '/colaboradores': 'M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2 M9 11a4 4 0 100-8 4 4 0 000 8 M23 21v-2a4 4 0 00-3-3.87 M16 3.13a4 4 0 010 7.75',
-  '/auditoria':     'M9 11l3 3L22 4 M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11',
-  '/configuracoes': 'M12 15a3 3 0 100-6 3 3 0 000 6z M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z',
+  '/dashboard':            'M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z M9 22V12h6v10',
+  '/funcionarios':         'M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z M14 2v6h6 M16 13H8 M16 17H8 M10 9H8',
+  '/colaboradores':        'M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2 M9 11a4 4 0 100-8 4 4 0 000 8 M23 21v-2a4 4 0 00-3-3.87 M16 3.13a4 4 0 010 7.75',
+  '/auditoria':            'M9 11l3 3L22 4 M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11',
+  '/matriz-competencias':  'M3 3h18v18H3z M3 9h18 M3 15h18 M9 3v18 M15 3v18',
+  '/configuracoes':        'M12 15a3 3 0 100-6 3 3 0 000 6z M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z',
 }
 
 function SvgIcon({ path, size = 18, cor = 'currentColor' }: { path: string; size?: number; cor?: string }) {
@@ -54,15 +55,19 @@ useEffect(() => {
   }
 
   const todosItens = [
-    { label: 'Dashboard',     href: '/dashboard',     niveis: ['admin', 'operador', 'visualizador'] },
-    { label: 'Painel Operacional',  href: '/funcionarios',  niveis: ['admin', 'operador', 'visualizador'] },
-    { label: 'Colaboradores', href: '/colaboradores', niveis: ['admin', 'operador'] },
-    { label: 'Auditoria',     href: '/auditoria',     niveis: ['admin', 'operador'] },
-    { label: 'Configurações', href: '/configuracoes', niveis: ['admin'] },
+    { label: 'Dashboard',              href: '/dashboard',            niveis: ['admin', 'operador', 'visualizador'], modulo: null },
+    { label: 'Painel Operacional',     href: '/funcionarios',         niveis: ['admin', 'operador', 'visualizador'], modulo: null },
+    { label: 'Matriz de Competências', href: '/matriz-competencias',  niveis: [] as string[],                        modulo: 'matriz' },
+    { label: 'Colaboradores',          href: '/colaboradores',        niveis: ['admin', 'operador'],                 modulo: null },
+    { label: 'Auditoria',              href: '/auditoria',            niveis: ['admin', 'operador'],                 modulo: null },
+    { label: 'Configurações',          href: '/configuracoes',        niveis: ['admin'],                             modulo: null },
   ]
 
   const itensFiltrados = usuario
-    ? todosItens.filter(item => item.niveis.includes(usuario.nivel))
+    ? todosItens.filter(item => {
+        if (item.modulo) return usuario.nivel === 'admin' || (usuario.modulos_acesso || []).includes(item.modulo)
+        return item.niveis.includes(usuario.nivel)
+      })
     : todosItens
 
   const largura = recolhida ? 64 : 220

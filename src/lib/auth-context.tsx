@@ -10,6 +10,7 @@ interface Usuario {
   nivel: 'admin' | 'operador' | 'visualizador'
   pode_auditar: boolean
   bases: number[]
+  modulos_acesso: string[]
 }
 
 interface AuthContextType {
@@ -30,7 +31,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       const { data: perfil } = await supabase
         .from('usuarios')
-        .select('id, email, nome, nivel, pode_auditar')
+        .select('id, email, nome, nivel, pode_auditar, modulos_acesso')
         .eq('id', user.id)
         .single()
 
@@ -53,6 +54,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         nivel: perfil.nivel,
         pode_auditar: perfil.pode_auditar,
         bases,
+        modulos_acesso: perfil.modulos_acesso || [],
       })
       setCarregando(false)
     }
