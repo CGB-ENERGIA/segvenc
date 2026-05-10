@@ -743,12 +743,14 @@ export default function BaseNRPage() {
       matricula, nome, funcao_id, situacao, data_admissao,
       bases (nome),
       funcoes (nome),
-      gerencias (sigla, nome)
+      gerencias!colaboradores_gerencia_id_fkey (sigla, nome)
     `).order('nome')
     if (filtroSituacao) colabQuery = colabQuery.eq('situacao', filtroSituacao)
     if (filtroBase) colabQuery = colabQuery.eq('base_id', filtroBase)
     if (filtroGerencia) colabQuery = colabQuery.eq('gerencia_id', filtroGerencia)
-    const { data: colabData } = await colabQuery
+    const { data: colabData, error: colabError } = await colabQuery
+console.log('colabError:', colabError)
+console.log('colabData length:', colabData?.length)
 
     const matriculas = (colabData || []).map((c: any) => c.matricula)
     const regraIds = nrsParaBuscar.map(n => n.id)
@@ -767,6 +769,7 @@ export default function BaseNRPage() {
         .map((r: any) => ({ ...r, programacoes: r.programacoes_exames || [] })),
     }))
     setColaboradores(mapped as unknown as Colaborador[])
+    console.log('colabData:', colabData?.length, 'registrosData:', registrosData?.length, 'mapped:', mapped.length)
     setCarregando(false)
   }
 
