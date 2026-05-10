@@ -6,7 +6,8 @@
       "Bash(git commit *)",
       "Bash(git push *)",
       "Bash(Get-ChildItem -Path . -Directory)",
-      "Bash(Select-Object Name)"
+      "Bash(Select-Object Name)",
+      "Bash(git -C \"C:\\\\Users\\\\Mario Henrique\\\\segvenc\" show e95ae15:src/app/\\\\\\(sistema\\\\\\)/matriz-competencias/page.tsx)"
     ]
   }
 }

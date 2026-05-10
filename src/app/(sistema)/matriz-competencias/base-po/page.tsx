@@ -54,6 +54,7 @@ type OrdemDirecao = 'asc' | 'desc'
 type AbaModal = 'info' | 'documento' | 'programacao' | 'auditoria'
 
 const COR = '#9f183c'
+const TREINAMENTOS_ALVO = ['Direção Defensiva', 'Pilotagem Defensiva']
 
 // ─── HELPERS ─────────────────────────────────────────────────────────────────
 
@@ -128,11 +129,11 @@ function exportarCSV(dados: Record<string, string>[]) {
   const cabecalhos = Object.keys(dados[0])
   const linhas = dados.map(row => cabecalhos.map(h => `"${(row[h] || '').replace(/"/g, '""')}"`).join(';'))
   const csv = [cabecalhos.map(h => `"${h}"`).join(';'), ...linhas].join('\n')
-  const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' })
+  const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' })
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
-  a.download = `painel-operacional-${new Date().toLocaleDateString('pt-BR').replace(/\//g, '-')}.csv`
+  a.download = `base-po-${new Date().toLocaleDateString('pt-BR').replace(/\//g, '-')}.csv`
   a.click()
   URL.revokeObjectURL(url)
 }
@@ -142,11 +143,10 @@ function exportarXLSX(dados: Record<string, string>[]) {
   import('xlsx').then(XLSX => {
     const ws = XLSX.utils.json_to_sheet(dados)
     const wb = XLSX.utils.book_new()
-    XLSX.utils.book_append_sheet(wb, ws, 'Painel Operacional')
-    XLSX.writeFile(wb, `painel-operacional-${new Date().toLocaleDateString('pt-BR').replace(/\//g, '-')}.xlsx`)
+    XLSX.utils.book_append_sheet(wb, ws, 'BASE PO')
+    XLSX.writeFile(wb, `base-po-${new Date().toLocaleDateString('pt-BR').replace(/\//g, '-')}.xlsx`)
   })
 }
-
 
 // ─── BOTÃO EXPORTAR ───────────────────────────────────────────────────────────
 
@@ -250,7 +250,7 @@ function ModalNovoExame({ colaborador, treinamentos, onFechar, onAtualizar, usua
   }, [form.regra_id, form.data_realizacao])
 
   async function salvar() {
-    if (!form.regra_id || !form.data_realizacao) { setErro('Preencha o tipo de exame e a data de realização.'); return }
+    if (!form.regra_id || !form.data_realizacao) { setErro('Preencha o tipo e a data de realização.'); return }
     setSalvando(true); setErro('')
     try {
       await supabase.from('registros_exames').update({ is_atual: false })
@@ -282,14 +282,14 @@ function ModalNovoExame({ colaborador, treinamentos, onFechar, onAtualizar, usua
       <div style={{ backgroundColor: 'white', borderRadius: 16, padding: 28, width: '100%', maxWidth: 480, boxShadow: '0 20px 60px rgba(0,0,0,0.2)' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 }}>
           <div>
-            <h2 style={{ fontSize: 16, fontWeight: 600, color: '#1a1a1a', margin: 0 }}>Novo Exame</h2>
+            <h2 style={{ fontSize: 16, fontWeight: 600, color: '#1a1a1a', margin: 0 }}>Novo Registro</h2>
             <p style={{ fontSize: 13, color: '#888', margin: '3px 0 0' }}>{colaborador.nome} · {colaborador.matricula}</p>
           </div>
           <button onClick={onFechar} style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: '#aaa' }}>✕</button>
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
           <div>
-            <label style={{ fontSize: 12, color: '#666', display: 'block', marginBottom: 4 }}>Tipo de exame *</label>
+            <label style={{ fontSize: 12, color: '#666', display: 'block', marginBottom: 4 }}>Treinamento *</label>
             <select value={form.regra_id} onChange={e => setForm(f => ({ ...f, regra_id: e.target.value }))} style={inputStyle}>
               <option value="">Selecione...</option>
               {treinamentos.map(t => <option key={t.id} value={t.id}>{t.nome}</option>)}
@@ -588,13 +588,13 @@ function ModalExame({ dados, abaInicial, onFechar, onAtualizar, usuarioEmail, po
               ) : (
                 <div style={{ textAlign: 'center', padding: '40px 0', color: '#aaa' }}>
                   <p style={{ fontSize: 32, margin: '0 0 8px' }}>📋</p>
-                  <p style={{ fontSize: 14 }}>Nenhum registro encontrado para este exame.</p>
+                  <p style={{ fontSize: 14 }}>Nenhum registro encontrado para este treinamento.</p>
                 </div>
               )}
               {registro && nivelUsuario === 'admin' && (
                 <div style={{ marginTop: 24, paddingTop: 20, borderTop: '1px solid #f0f0f0' }}>
                   <button onClick={() => { setConfirmacaoNome(''); setErroExcluir(''); setModalExcluir(true) }} style={{ height: 36, padding: '0 16px', fontSize: 12, border: '1px solid #fca5a5', borderRadius: 8, backgroundColor: '#fef2f2', color: '#dc2626', cursor: 'pointer' }}>
-                    🗑 Excluir este exame
+                    🗑 Excluir este registro
                   </button>
                 </div>
               )}
@@ -603,7 +603,7 @@ function ModalExame({ dados, abaInicial, onFechar, onAtualizar, usuarioEmail, po
           {modalExcluir && (
             <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 200 }}>
               <div style={{ backgroundColor: 'white', borderRadius: 16, padding: 28, width: '100%', maxWidth: 440, boxShadow: '0 20px 60px rgba(0,0,0,0.25)' }}>
-                <h3 style={{ fontSize: 16, fontWeight: 600, color: '#dc2626', margin: '0 0 8px' }}>Excluir exame</h3>
+                <h3 style={{ fontSize: 16, fontWeight: 600, color: '#dc2626', margin: '0 0 8px' }}>Excluir registro</h3>
                 <p style={{ fontSize: 13, color: '#555', margin: '0 0 16px', lineHeight: 1.5 }}>
                   Esta ação é <strong>irreversível</strong>. Serão removidos o registro, os logs de auditoria e as programações associadas.<br /><br />
                   Para confirmar, digite o nome do treinamento:
@@ -735,7 +735,7 @@ function ModalExame({ dados, abaInicial, onFechar, onAtualizar, usuarioEmail, po
 
 // ─── PÁGINA PRINCIPAL ─────────────────────────────────────────────────────────
 
-export default function FuncionariosPage() {
+export default function BasePOPage() {
   const router = useRouter()
   const { usuario } = useAuth()
   const [colaboradores, setColaboradores] = useState<Colaborador[]>([])
@@ -769,35 +769,45 @@ export default function FuncionariosPage() {
       if (!user) { router.push('/login'); return }
       const [{ data: basesData }, { data: regrasData }] = await Promise.all([
         supabase.from('bases').select('id, nome').order('nome'),
-        supabase.from('regras_vencimento').select('id, nome_item, validade_dias').order('nome_item'),
+        supabase.from('regras_vencimento').select('id, nome_item, validade_dias')
+          .in('nome_item', TREINAMENTOS_ALVO).order('nome_item'),
       ])
       setBases(basesData || [])
       const ts: Treinamento[] = (regrasData || []).map((r: any) => ({ id: r.id, nome: r.nome_item, validade_dias: r.validade_dias }))
       setTreinamentos(ts)
       const todasCols = ['matricula', 'nome', 'funcao', 'situacao', 'base', 'admissao', ...ts.map(t => `exame_${t.id}`)]
       setColunasVisiveis(todasCols)
-      await buscarColaboradores()
+      await buscarColaboradores(ts)
     }
     init()
   }, [])
 
-  async function buscarColaboradores() {
+  async function buscarColaboradores(treinamentosParam?: Treinamento[]) {
+    const treinamentosParaBuscar = treinamentosParam ?? treinamentos
     setCarregando(true)
-    let query = supabase.from('colaboradores').select(`
+
+    let colabQuery = supabase.from('colaboradores').select(`
       matricula, nome, funcao_id, situacao, data_admissao,
-      bases (nome), funcoes (nome),
-      registros_exames (
-        id, regra_id, data_realizacao, data_vencimento, url_arquivo,
-        logs_auditoria (id, auditor_email, data_auditoria, validado, observacao),
-        programacoes_exames (id, data_programada, observacao, criado_por, created_at)
-      )
-    `).eq('registros_exames.is_atual', true).order('nome')
-    if (filtroSituacao) query = query.eq('situacao', filtroSituacao)
-    if (filtroBase) query = query.eq('base_id', filtroBase)
-    const { data } = await query
-    const mapped = (data || []).map((c: any) => ({
+      bases (nome), funcoes (nome)
+    `).order('nome')
+    if (filtroSituacao) colabQuery = colabQuery.eq('situacao', filtroSituacao)
+    if (filtroBase) colabQuery = colabQuery.eq('base_id', filtroBase)
+    const { data: colabData } = await colabQuery
+
+    const regraIds = treinamentosParaBuscar.map(t => t.id)
+    const { data: registrosData } = regraIds.length > 0
+      ? await supabase.from('registros_exames').select(`
+          id, regra_id, matricula_colaborador, data_realizacao, data_vencimento, url_arquivo,
+          logs_auditoria (id, auditor_email, data_auditoria, validado, observacao),
+          programacoes_exames (id, data_programada, observacao, criado_por, created_at)
+        `).eq('is_atual', true).in('regra_id', regraIds)
+      : { data: [] }
+
+    const mapped = (colabData || []).map((c: any) => ({
       ...c,
-      registros_exames: (c.registros_exames || []).map((r: any) => ({ ...r, programacoes: r.programacoes_exames || [] })),
+      registros_exames: (registrosData || [])
+        .filter((r: any) => r.matricula_colaborador === c.matricula)
+        .map((r: any) => ({ ...r, programacoes: r.programacoes_exames || [] })),
     }))
     setColaboradores(mapped as unknown as Colaborador[])
     setCarregando(false)
@@ -826,11 +836,11 @@ export default function FuncionariosPage() {
     else { setOrdemColuna(coluna); setOrdemDirecao('asc') }
   }
 
-function limparFiltros() {
-  setFiltroBusca(''); setFiltroFuncoes([]); setFiltroBase('')
-  setFiltroSituacao('ATIVO'); setFiltroAdmissaoInput(''); setFiltroExameInput('')
-  setFiltroStatus(null)
-}
+  function limparFiltros() {
+    setFiltroBusca(''); setFiltroFuncoes([]); setFiltroBase('')
+    setFiltroSituacao('ATIVO'); setFiltroAdmissaoInput(''); setFiltroExameInput('')
+    setFiltroStatus(null)
+  }
 
   function handleExportar(tipo: 'csv' | 'xlsx') {
     const dados = gerarDadosExportacao(ordenados, treinamentos)
@@ -846,9 +856,9 @@ function limparFiltros() {
     if (filtroAdmissaoMes && filtroAdmissaoAno && c.data_admissao) { const d = new Date(c.data_admissao); if (d.getMonth() + 1 !== parseInt(filtroAdmissaoMes) || d.getFullYear() !== parseInt(filtroAdmissaoAno)) return false }
     if (filtroExameMes && filtroExameAno) { const mes = parseInt(filtroExameMes), ano = parseInt(filtroExameAno); if (!(c.registros_exames || []).some(r => { const d = new Date(r.data_vencimento); return d.getMonth() + 1 === mes && d.getFullYear() === ano })) return false }
     if (filtroStatus) {
-    const temExameNoStatus = (c.registros_exames || []).some(r => getStatusVencimento(r.data_vencimento) === filtroStatus)
-    if (!temExameNoStatus) return false
-  }
+      const temExameNoStatus = (c.registros_exames || []).some(r => getStatusVencimento(r.data_vencimento) === filtroStatus)
+      if (!temExameNoStatus) return false
+    }
     return true
   })
 
@@ -864,14 +874,14 @@ function limparFiltros() {
   })
 
   const filtradosSemStatus = colaboradores.filter(c => {
-  if (filtroBusca) { const b = filtroBusca.toLowerCase(); if (!c.nome.toLowerCase().includes(b) && !c.matricula.includes(filtroBusca)) return false }
-  if (filtroFuncoes.length > 0 && !filtroFuncoes.includes(c.funcoes?.nome || '')) return false
-  if (filtroAdmissaoMes && filtroAdmissaoAno && c.data_admissao) { const d = new Date(c.data_admissao); if (d.getMonth() + 1 !== parseInt(filtroAdmissaoMes) || d.getFullYear() !== parseInt(filtroAdmissaoAno)) return false }
-  if (filtroExameMes && filtroExameAno) { const mes = parseInt(filtroExameMes), ano = parseInt(filtroExameAno); if (!(c.registros_exames || []).some(r => { const d = new Date(r.data_vencimento); return d.getMonth() + 1 === mes && d.getFullYear() === ano })) return false }
-  return true
-})
-const stats = calcularStats(filtradosSemStatus)
- const temFiltroAtivo = !!(filtroBusca || filtroFuncoes.length > 0 || filtroAdmissaoInput || filtroExameInput || filtroStatus)
+    if (filtroBusca) { const b = filtroBusca.toLowerCase(); if (!c.nome.toLowerCase().includes(b) && !c.matricula.includes(filtroBusca)) return false }
+    if (filtroFuncoes.length > 0 && !filtroFuncoes.includes(c.funcoes?.nome || '')) return false
+    if (filtroAdmissaoMes && filtroAdmissaoAno && c.data_admissao) { const d = new Date(c.data_admissao); if (d.getMonth() + 1 !== parseInt(filtroAdmissaoMes) || d.getFullYear() !== parseInt(filtroAdmissaoAno)) return false }
+    if (filtroExameMes && filtroExameAno) { const mes = parseInt(filtroExameMes), ano = parseInt(filtroExameAno); if (!(c.registros_exames || []).some(r => { const d = new Date(r.data_vencimento); return d.getMonth() + 1 === mes && d.getFullYear() === ano })) return false }
+    return true
+  })
+  const stats = calcularStats(filtradosSemStatus)
+  const temFiltroAtivo = !!(filtroBusca || filtroFuncoes.length > 0 || filtroAdmissaoInput || filtroExameInput || filtroStatus)
   const vis = (key: string) => colunasVisiveis.includes(key)
 
   const todasColunasDef = [
@@ -893,7 +903,10 @@ const stats = calcularStats(filtradosSemStatus)
 
   return (
     <div style={{ fontFamily: 'Arial, sans-serif', display: 'flex', flexDirection: 'column', height: '100%' }}>
-      <h1 style={{ fontSize: 18, fontWeight: 600, color: '#1a1a1a', margin: '0 0 12px' }}>Painel Operacional</h1>
+      <div style={{ marginBottom: 12 }}>
+        <h1 style={{ fontSize: 18, fontWeight: 600, color: '#1a1a1a', margin: 0 }}>Matriz de Competências</h1>
+        <p style={{ fontSize: 13, color: '#888', margin: '3px 0 0' }}>BASE PO — Treinamentos Operacionais</p>
+      </div>
 
       {/* CARDS */}
       {carregando ? (
@@ -908,38 +921,36 @@ const stats = calcularStats(filtradosSemStatus)
       ) : (
         <div style={{ display: 'flex', gap: 12, marginBottom: 12, overflowX: 'auto', paddingBottom: 4 }}>
           {[
-        { label: 'Colaboradores', valor: filtrados.length, cor: '#4a4a49', status: null },
-{ label: 'Exames Válidos', valor: stats.examesValidos, cor: '#16a34a', status: 'valido' as const },
-{ label: 'Próximos do Vencimento', valor: stats.proximosVencimento, cor: '#d97706', status: 'proximo' as const },
-{ label: 'Vencidos', valor: stats.vencidos, cor: '#dc2626', status: 'vencido' as const },
-        ].map((card, i) => {
-  const ativo = filtroStatus === card.status && card.status !== null
-  return (
-    <div
-      key={i}
-      onClick={() => card.status !== null && setFiltroStatus(ativo ? null : card.status)}
-      style={{
-        backgroundColor: ativo ? card.cor + '10' : 'white',
-        borderRadius: 10,
-        padding: '10px 16px',
-        border: ativo ? `2px solid ${card.cor}` : '1px solid #f0f0f0',
-        minWidth: 160,
-        flex: '1 0 160px',
-        cursor: card.status !== null ? 'pointer' : 'default',
-        transition: 'all 0.15s ease',
-        boxShadow: ativo ? `0 2px 8px ${card.cor}30` : 'none',
-      }}
-    >
-      <p style={{ fontSize: 11, color: '#888', margin: '0 0 4px' }}>
-        {card.label}
-        {ativo && <span style={{ marginLeft: 6, fontSize: 10, color: card.cor }}>● filtrado</span>}
-      </p>
-      <p style={{ fontSize: 24, fontWeight: 600, color: card.cor, margin: 0 }}>
-        {card.valor.toLocaleString('pt-BR')}
-      </p>
-    </div>
-  )
-})}
+            { label: 'Colaboradores', valor: filtrados.length, cor: '#4a4a49', status: null },
+            { label: 'Registros Válidos', valor: stats.examesValidos, cor: '#16a34a', status: 'valido' as const },
+            { label: 'Próximos do Vencimento', valor: stats.proximosVencimento, cor: '#d97706', status: 'proximo' as const },
+            { label: 'Vencidos', valor: stats.vencidos, cor: '#dc2626', status: 'vencido' as const },
+          ].map((card, i) => {
+            const ativo = filtroStatus === card.status && card.status !== null
+            return (
+              <div
+                key={i}
+                onClick={() => card.status !== null && setFiltroStatus(ativo ? null : card.status)}
+                style={{
+                  backgroundColor: ativo ? card.cor + '10' : 'white',
+                  borderRadius: 10, padding: '10px 16px',
+                  border: ativo ? `2px solid ${card.cor}` : '1px solid #f0f0f0',
+                  minWidth: 160, flex: '1 0 160px',
+                  cursor: card.status !== null ? 'pointer' : 'default',
+                  transition: 'all 0.15s ease',
+                  boxShadow: ativo ? `0 2px 8px ${card.cor}30` : 'none',
+                }}
+              >
+                <p style={{ fontSize: 11, color: '#888', margin: '0 0 4px' }}>
+                  {card.label}
+                  {ativo && <span style={{ marginLeft: 6, fontSize: 10, color: card.cor }}>● filtrado</span>}
+                </p>
+                <p style={{ fontSize: 24, fontWeight: 600, color: card.cor, margin: 0 }}>
+                  {card.valor.toLocaleString('pt-BR')}
+                </p>
+              </div>
+            )
+          })}
         </div>
       )}
 
@@ -999,7 +1010,7 @@ const stats = calcularStats(filtradosSemStatus)
                       <td style={{ ...stickyBase, left: vis('matricula') ? 100 : 0, padding: padCell, verticalAlign: 'middle', minWidth: 220, borderRight: '1px solid #f0f0f0', backgroundColor: bgRow }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                           <span style={{ fontWeight: 500, color: '#333', whiteSpace: 'nowrap' }}>{colab.nome}</span>
-                          <button title="Adicionar novo exame" onClick={e => { e.stopPropagation(); setModalNovoExame(colab) }}
+                          <button title="Adicionar novo registro" onClick={e => { e.stopPropagation(); setModalNovoExame(colab) }}
                             style={{ width: 20, height: 20, borderRadius: '50%', backgroundColor: '#f0f0f0', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, color: '#888', flexShrink: 0, lineHeight: 1 }}
                             onMouseEnter={e => { e.currentTarget.style.backgroundColor = '#fdf2f5'; e.currentTarget.style.color = COR }}
                             onMouseLeave={e => { e.currentTarget.style.backgroundColor = '#f0f0f0'; e.currentTarget.style.color = '#888' }}>+</button>

@@ -586,26 +586,34 @@ export default function MedTrabPage() {
 
   async function carregar() {
     setCarregando(true)
-    const { data } = await supabase.from('colaboradores').select(`
-      matricula, nome, situacao, funcao_id,
-      bases (nome),
-      funcoes (nome),
-      gerencias (sigla),
-      asos (
-        id, tipo, data_realizacao, data_vencimento, gse, observacao, url_arquivo
-      )
-    `)
-    if (data) {
-      setColaboradores(data as unknown as Colaborador[])
-      const basesUnicas = [
-        ...new Set(data.map((c: any) => c.bases?.nome).filter(Boolean) as string[]),
-      ].sort()
-      setBases(basesUnicas)
-    }
-    const { data: ger } = await supabase
-      .from('gerencias')
-      .select('id, sigla, nome')
-      .order('sigla')
+
+    const [{ data: colabData }, { data: ger }] = await Promise.all([
+      supabase.from('colaboradores').select(`
+        matricula, nome, situacao, funcao_id,
+        bases (nome),
+        funcoes (nome),
+        gerencias (sigla)
+      `),
+      supabase.from('gerencias').select('id, sigla, nome').order('sigla'),
+    ])
+
+    const matriculas = (colabData || []).map((c: any) => c.matricula)
+    const { data: asosData } = matriculas.length > 0
+      ? await supabase.from('asos').select(
+          'id, matricula_colaborador, tipo, data_realizacao, data_vencimento, gse, observacao, url_arquivo'
+        ).in('matricula_colaborador', matriculas)
+      : { data: [] }
+
+    const mapped = (colabData || []).map((c: any) => ({
+      ...c,
+      asos: (asosData || []).filter((a: any) => a.matricula_colaborador === c.matricula),
+    }))
+
+    setColaboradores(mapped as unknown as Colaborador[])
+    const basesUnicas = [
+      ...new Set(mapped.map(c => c.bases?.nome).filter(Boolean) as string[]),
+    ].sort()
+    setBases(basesUnicas)
     if (ger) setGerencias(ger)
     setCarregando(false)
   }
