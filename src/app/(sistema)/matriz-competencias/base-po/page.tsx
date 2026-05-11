@@ -129,7 +129,7 @@ function exportarCSV(dados: Record<string, string>[]) {
   const cabecalhos = Object.keys(dados[0])
   const linhas = dados.map(row => cabecalhos.map(h => `"${(row[h] || '').replace(/"/g, '""')}"`).join(';'))
   const csv = [cabecalhos.map(h => `"${h}"`).join(';'), ...linhas].join('\n')
-  const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' })
+  const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' })
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
@@ -153,47 +153,27 @@ function exportarXLSX(dados: Record<string, string>[]) {
 function BotaoExportar({ onClick }: { onClick: (tipo: 'csv' | 'xlsx') => void }) {
   const [aberto, setAberto] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
-
   useEffect(() => {
     const h = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setAberto(false) }
     document.addEventListener('mousedown', h); return () => document.removeEventListener('mousedown', h)
   }, [])
-
   return (
     <div ref={ref} style={{ position: 'relative' }}>
-      <button onClick={() => setAberto(!aberto)} style={{
-        height: 36, padding: '0 10px', fontSize: 12,
-        border: '1px solid #e0e0e0', borderRadius: 8,
-        backgroundColor: 'white', color: '#555', cursor: 'pointer',
-        display: 'flex', alignItems: 'center', gap: 4,
-      }}>
+      <button onClick={() => setAberto(!aberto)} style={{ height: 36, padding: '0 10px', fontSize: 12, border: '1px solid #e0e0e0', borderRadius: 8, backgroundColor: 'white', color: '#555', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4 }}>
         <svg width={18} height={18} viewBox="0 0 24 24" fill="none" stroke="#16a34a" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
           <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8zM14 2v6h6M8 13h2m4 0h2M8 17h2m4 0h2M10 13v4" />
         </svg>
         <span style={{ fontSize: 10 }}>{aberto ? '▲' : '▼'}</span>
       </button>
       {aberto && (
-        <div style={{
-          position: 'absolute', top: 40, right: 0, zIndex: 50,
-          backgroundColor: 'white', border: '1px solid #e0e0e0',
-          borderRadius: 10, boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
-          width: 180, overflow: 'hidden',
-        }}>
-          <button onClick={() => { onClick('csv'); setAberto(false) }} style={{
-            width: '100%', padding: '10px 16px', fontSize: 13, textAlign: 'left',
-            border: 'none', background: 'none', cursor: 'pointer', color: '#333',
-            display: 'flex', alignItems: 'center', gap: 10,
-          }}
+        <div style={{ position: 'absolute', top: 40, right: 0, zIndex: 50, backgroundColor: 'white', border: '1px solid #e0e0e0', borderRadius: 10, boxShadow: '0 8px 24px rgba(0,0,0,0.12)', width: 180, overflow: 'hidden' }}>
+          <button onClick={() => { onClick('csv'); setAberto(false) }} style={{ width: '100%', padding: '10px 16px', fontSize: 13, textAlign: 'left', border: 'none', background: 'none', cursor: 'pointer', color: '#333', display: 'flex', alignItems: 'center', gap: 10 }}
             onMouseEnter={e => e.currentTarget.style.backgroundColor = '#f9f9f9'}
             onMouseLeave={e => e.currentTarget.style.backgroundColor = 'transparent'}>
             📄 Exportar CSV
           </button>
           <div style={{ height: 1, backgroundColor: '#f0f0f0' }} />
-          <button onClick={() => { onClick('xlsx'); setAberto(false) }} style={{
-            width: '100%', padding: '10px 16px', fontSize: 13, textAlign: 'left',
-            border: 'none', background: 'none', cursor: 'pointer', color: '#333',
-            display: 'flex', alignItems: 'center', gap: 10,
-          }}
+          <button onClick={() => { onClick('xlsx'); setAberto(false) }} style={{ width: '100%', padding: '10px 16px', fontSize: 13, textAlign: 'left', border: 'none', background: 'none', cursor: 'pointer', color: '#333', display: 'flex', alignItems: 'center', gap: 10 }}
             onMouseEnter={e => e.currentTarget.style.backgroundColor = '#f9f9f9'}
             onMouseLeave={e => e.currentTarget.style.backgroundColor = 'transparent'}>
             📊 Exportar Excel
@@ -217,9 +197,7 @@ function Icone({ tipo, cor, titulo, size = 16 }: { tipo: string; cor: string; ti
     olho: 'M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8zM12 9a3 3 0 100 6 3 3 0 000-6z',
   }
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none"
-      stroke={cor} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"
-      style={{ display: 'inline-block', verticalAlign: 'middle', flexShrink: 0 }}>
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={cor} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" style={{ display: 'inline-block', verticalAlign: 'middle', flexShrink: 0 }}>
       {titulo && <title>{titulo}</title>}
       <path d={paths[tipo] || ''} />
     </svg>
@@ -523,7 +501,7 @@ function ModalExame({ dados, abaInicial, onFechar, onAtualizar, usuarioEmail, po
 
   async function excluirExame() {
     if (!registro) return
-    if (confirmacaoNome !== treinamento) { setErroExcluir('O nome digitado não confere. Tente novamente.'); return }
+    if (confirmacaoNome !== treinamento) { setErroExcluir('O nome digitado não confere.'); return }
     setExcluindo(true); setErroExcluir('')
     const { error } = await supabase.from('registros_exames').delete().eq('id', registro.id)
     if (error) { setErroExcluir(error.message); setExcluindo(false); return }
@@ -584,18 +562,18 @@ function ModalExame({ dados, abaInicial, onFechar, onAtualizar, usuarioEmail, po
                       {log.observacao && <p style={{ fontSize: 12, color: '#666', margin: '4px 0 0', fontStyle: 'italic' }}>"{log.observacao}"</p>}
                     </div>
                   ))}
+                  {nivelUsuario === 'admin' && (
+                    <div style={{ marginTop: 24, paddingTop: 20, borderTop: '1px solid #f0f0f0' }}>
+                      <button onClick={() => { setConfirmacaoNome(''); setErroExcluir(''); setModalExcluir(true) }} style={{ height: 36, padding: '0 16px', fontSize: 12, border: '1px solid #fca5a5', borderRadius: 8, backgroundColor: '#fef2f2', color: '#dc2626', cursor: 'pointer' }}>
+                        🗑 Excluir este registro
+                      </button>
+                    </div>
+                  )}
                 </>
               ) : (
                 <div style={{ textAlign: 'center', padding: '40px 0', color: '#aaa' }}>
                   <p style={{ fontSize: 32, margin: '0 0 8px' }}>📋</p>
                   <p style={{ fontSize: 14 }}>Nenhum registro encontrado para este treinamento.</p>
-                </div>
-              )}
-              {registro && nivelUsuario === 'admin' && (
-                <div style={{ marginTop: 24, paddingTop: 20, borderTop: '1px solid #f0f0f0' }}>
-                  <button onClick={() => { setConfirmacaoNome(''); setErroExcluir(''); setModalExcluir(true) }} style={{ height: 36, padding: '0 16px', fontSize: 12, border: '1px solid #fca5a5', borderRadius: 8, backgroundColor: '#fef2f2', color: '#dc2626', cursor: 'pointer' }}>
-                    🗑 Excluir este registro
-                  </button>
                 </div>
               )}
             </div>
@@ -604,20 +582,9 @@ function ModalExame({ dados, abaInicial, onFechar, onAtualizar, usuarioEmail, po
             <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 200 }}>
               <div style={{ backgroundColor: 'white', borderRadius: 16, padding: 28, width: '100%', maxWidth: 440, boxShadow: '0 20px 60px rgba(0,0,0,0.25)' }}>
                 <h3 style={{ fontSize: 16, fontWeight: 600, color: '#dc2626', margin: '0 0 8px' }}>Excluir registro</h3>
-                <p style={{ fontSize: 13, color: '#555', margin: '0 0 16px', lineHeight: 1.5 }}>
-                  Esta ação é <strong>irreversível</strong>. Serão removidos o registro, os logs de auditoria e as programações associadas.<br /><br />
-                  Para confirmar, digite o nome do treinamento:
-                </p>
+                <p style={{ fontSize: 13, color: '#555', margin: '0 0 16px', lineHeight: 1.5 }}>Esta ação é <strong>irreversível</strong>. Para confirmar, digite o nome do treinamento:</p>
                 <p style={{ fontSize: 13, fontWeight: 600, color: '#333', margin: '0 0 8px', padding: '8px 12px', backgroundColor: '#f9f9f9', borderRadius: 8, borderLeft: '3px solid #dc2626' }}>{treinamento}</p>
-                <input
-                  type="text"
-                  autoFocus
-                  value={confirmacaoNome}
-                  onChange={e => setConfirmacaoNome(e.target.value)}
-                  onKeyDown={e => e.key === 'Enter' && excluirExame()}
-                  placeholder="Digite o nome exato..."
-                  style={{ width: '100%', height: 38, border: '1px solid #e0e0e0', borderRadius: 8, padding: '0 12px', fontSize: 13, boxSizing: 'border-box', outline: 'none', marginBottom: 8 }}
-                />
+                <input type="text" autoFocus value={confirmacaoNome} onChange={e => setConfirmacaoNome(e.target.value)} onKeyDown={e => e.key === 'Enter' && excluirExame()} placeholder="Digite o nome exato..." style={{ width: '100%', height: 38, border: '1px solid #e0e0e0', borderRadius: 8, padding: '0 12px', fontSize: 13, boxSizing: 'border-box', outline: 'none', marginBottom: 8 }} />
                 {erroExcluir && <p style={{ fontSize: 12, color: '#dc2626', margin: '0 0 12px' }}>{erroExcluir}</p>}
                 <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 12 }}>
                   <button onClick={() => setModalExcluir(false)} disabled={excluindo} style={{ height: 38, padding: '0 18px', border: '1px solid #e0e0e0', borderRadius: 8, fontSize: 13, cursor: 'pointer', background: 'white', color: '#555' }}>Cancelar</button>
@@ -744,7 +711,7 @@ export default function BasePOPage() {
   const [filtroBase, setFiltroBase] = useState('')
   const [filtroBusca, setFiltroBusca] = useState('')
   const [filtroFuncoes, setFiltroFuncoes] = useState<string[]>([])
-  const [filtroSituacao, setFiltroSituacao] = useState('ATIVO')
+  const [filtroSituacao, setFiltroSituacao] = useState('')
   const [filtroAdmissaoInput, setFiltroAdmissaoInput] = useState('')
   const [filtroExameInput, setFiltroExameInput] = useState('')
   const [filtroAdmissaoMes, setFiltroAdmissaoMes] = useState('')
@@ -786,24 +753,36 @@ export default function BasePOPage() {
     const treinamentosParaBuscar = treinamentosParam ?? treinamentos
     setCarregando(true)
 
-    let colabQuery = supabase.from('colaboradores').select(`
-      matricula, nome, funcao_id, situacao, data_admissao,
-      bases (nome), funcoes (nome)
-    `).order('nome')
-    if (filtroSituacao) colabQuery = colabQuery.eq('situacao', filtroSituacao)
-    if (filtroBase) colabQuery = colabQuery.eq('base_id', filtroBase)
-    const { data: colabData } = await colabQuery
+    // Paginação para evitar limite de 1000 do Supabase
+    let todosColabs: any[] = []
+    let from = 0
+    const pageSize = 500
+
+    while (true) {
+      let colabQuery = supabase.from('colaboradores').select(`
+        matricula, nome, funcao_id, situacao, data_admissao,
+        bases (nome), funcoes (nome)
+      `).order('nome').range(from, from + pageSize - 1)
+      if (filtroSituacao) colabQuery = colabQuery.eq('situacao', filtroSituacao)
+      if (filtroBase) colabQuery = colabQuery.eq('base_id', filtroBase)
+      const { data: colabData } = await colabQuery
+      if (!colabData || colabData.length === 0) break
+      todosColabs = [...todosColabs, ...colabData]
+      if (colabData.length < pageSize) break
+      from += pageSize
+    }
 
     const regraIds = treinamentosParaBuscar.map(t => t.id)
-    const { data: registrosData } = regraIds.length > 0
+    const matriculas = todosColabs.map((c: any) => c.matricula)
+    const { data: registrosData } = regraIds.length > 0 && matriculas.length > 0
       ? await supabase.from('registros_exames').select(`
           id, regra_id, matricula_colaborador, data_realizacao, data_vencimento, url_arquivo,
           logs_auditoria (id, auditor_email, data_auditoria, validado, observacao),
           programacoes_exames (id, data_programada, observacao, criado_por, created_at)
-        `).eq('is_atual', true).in('regra_id', regraIds)
+        `).eq('is_atual', true).in('regra_id', regraIds).in('matricula_colaborador', matriculas)
       : { data: [] }
 
-    const mapped = (colabData || []).map((c: any) => ({
+    const mapped = todosColabs.map((c: any) => ({
       ...c,
       registros_exames: (registrosData || [])
         .filter((r: any) => r.matricula_colaborador === c.matricula)
@@ -838,7 +817,7 @@ export default function BasePOPage() {
 
   function limparFiltros() {
     setFiltroBusca(''); setFiltroFuncoes([]); setFiltroBase('')
-    setFiltroSituacao('ATIVO'); setFiltroAdmissaoInput(''); setFiltroExameInput('')
+    setFiltroSituacao(''); setFiltroAdmissaoInput(''); setFiltroExameInput('')
     setFiltroStatus(null)
   }
 
@@ -881,7 +860,7 @@ export default function BasePOPage() {
     return true
   })
   const stats = calcularStats(filtradosSemStatus)
-  const temFiltroAtivo = !!(filtroBusca || filtroFuncoes.length > 0 || filtroAdmissaoInput || filtroExameInput || filtroStatus)
+  const temFiltroAtivo = !!(filtroBusca || filtroFuncoes.length > 0 || filtroAdmissaoInput || filtroExameInput || filtroStatus || filtroBase || filtroSituacao)
   const vis = (key: string) => colunasVisiveis.includes(key)
 
   const todasColunasDef = [
@@ -895,11 +874,7 @@ export default function BasePOPage() {
   const stickyHead: React.CSSProperties = { position: 'sticky', top: 0, zIndex: 3, backgroundColor: '#fafafa' }
   const padCell = compacto ? '4px 10px' : '8px 16px'
   const fontSize = compacto ? 12 : 13
-
-  const selectStyle: React.CSSProperties = {
-    height: 36, border: '1px solid #e0e0e0', borderRadius: 8,
-    padding: '0 10px', fontSize: 13, backgroundColor: 'white', color: '#555',
-  }
+  const selectStyle: React.CSSProperties = { height: 36, border: '1px solid #e0e0e0', borderRadius: 8, padding: '0 10px', fontSize: 13, backgroundColor: 'white', color: '#555' }
 
   return (
     <div style={{ fontFamily: 'Arial, sans-serif', display: 'flex', flexDirection: 'column', height: '100%' }}>
@@ -928,26 +903,9 @@ export default function BasePOPage() {
           ].map((card, i) => {
             const ativo = filtroStatus === card.status && card.status !== null
             return (
-              <div
-                key={i}
-                onClick={() => card.status !== null && setFiltroStatus(ativo ? null : card.status)}
-                style={{
-                  backgroundColor: ativo ? card.cor + '10' : 'white',
-                  borderRadius: 10, padding: '10px 16px',
-                  border: ativo ? `2px solid ${card.cor}` : '1px solid #f0f0f0',
-                  minWidth: 160, flex: '1 0 160px',
-                  cursor: card.status !== null ? 'pointer' : 'default',
-                  transition: 'all 0.15s ease',
-                  boxShadow: ativo ? `0 2px 8px ${card.cor}30` : 'none',
-                }}
-              >
-                <p style={{ fontSize: 11, color: '#888', margin: '0 0 4px' }}>
-                  {card.label}
-                  {ativo && <span style={{ marginLeft: 6, fontSize: 10, color: card.cor }}>● filtrado</span>}
-                </p>
-                <p style={{ fontSize: 24, fontWeight: 600, color: card.cor, margin: 0 }}>
-                  {card.valor.toLocaleString('pt-BR')}
-                </p>
+              <div key={i} onClick={() => card.status !== null && setFiltroStatus(ativo ? null : card.status)} style={{ backgroundColor: ativo ? card.cor + '10' : 'white', borderRadius: 10, padding: '10px 16px', border: ativo ? `2px solid ${card.cor}` : '1px solid #f0f0f0', minWidth: 160, flex: '1 0 160px', cursor: card.status !== null ? 'pointer' : 'default', transition: 'all 0.15s ease', boxShadow: ativo ? `0 2px 8px ${card.cor}30` : 'none' }}>
+                <p style={{ fontSize: 11, color: '#888', margin: '0 0 4px' }}>{card.label}{ativo && <span style={{ marginLeft: 6, fontSize: 10, color: card.cor }}>● filtrado</span>}</p>
+                <p style={{ fontSize: 24, fontWeight: 600, color: card.cor, margin: 0 }}>{card.valor.toLocaleString('pt-BR')}</p>
               </div>
             )
           })}
@@ -1001,7 +959,9 @@ export default function BasePOPage() {
               </tr>
             </thead>
             <tbody>
-              {ordenados.map((colab, i) => {
+              {ordenados.length === 0 ? (
+                <tr><td colSpan={99} style={{ padding: '40px 20px', textAlign: 'center', color: '#aaa', fontSize: 14 }}>Nenhum colaborador encontrado.</td></tr>
+              ) : ordenados.map((colab, i) => {
                 const bgRow = i % 2 === 0 ? 'white' : '#fafafa'
                 return (
                   <tr key={colab.matricula} style={{ borderBottom: '1px solid #f5f5f5', backgroundColor: bgRow }}>

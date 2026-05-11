@@ -705,7 +705,7 @@ export default function BaseNRPage() {
   const [carregando, setCarregando] = useState(true)
   const [filtroBusca, setFiltroBusca] = useState('')
   const [filtroBase, setFiltroBase] = useState('')
-  const [filtroSituacao, setFiltroSituacao] = useState('ATIVO')
+  const [filtroSituacao, setFiltroSituacao] = useState('')
   const [filtroGerencia, setFiltroGerencia] = useState('')
   const [filtroStatus, setFiltroStatus] = useState<'valido' | 'proximo' | 'vencido' | null>(null)
   const [compacto, setCompacto] = useState(false)
@@ -736,45 +736,52 @@ export default function BaseNRPage() {
   }, [])
 
   async function buscarColaboradores(nrsParam?: NR[]) {
-    const nrsParaBuscar = nrsParam ?? nrs
-    setCarregando(true)
+  const nrsParaBuscar = nrsParam ?? nrs
+  setCarregando(true)
 
+  // Buscar todos os colaboradores com paginação (evita limite de 1000 do Supabase)
+  let todosColabs: any[] = []
+  let from = 0
+  const pageSize = 500
+
+  while (true) {
     let colabQuery = supabase.from('colaboradores').select(`
       matricula, nome, funcao_id, situacao, data_admissao,
       bases (nome),
       funcoes (nome),
       gerencias!colaboradores_gerencia_id_fkey (sigla, nome)
-    `).order('nome')
+    `).order('nome').range(from, from + pageSize - 1)
     if (filtroSituacao) colabQuery = colabQuery.eq('situacao', filtroSituacao)
     if (filtroBase) colabQuery = colabQuery.eq('base_id', filtroBase)
     if (filtroGerencia) colabQuery = colabQuery.eq('gerencia_id', filtroGerencia)
-    const { data: colabData, error: colabError } = await colabQuery
-console.log('colabError:', colabError)
-console.log('colabData length:', colabData?.length)
-
-    const matriculas = (colabData || []).map((c: any) => c.matricula)
-    const regraIds = nrsParaBuscar.map(n => n.id)
-    const { data: registrosData } = matriculas.length > 0 && regraIds.length > 0
-      ? await supabase.from('registros_exames').select(`
-          id, matricula_colaborador, regra_id, data_realizacao, data_vencimento, url_arquivo,
-          logs_auditoria (id, auditor_email, data_auditoria, validado, observacao),
-          programacoes_exames (id, data_programada, observacao, criado_por, created_at)
-        `).eq('is_atual', true).in('regra_id', regraIds).in('matricula_colaborador', matriculas)
-      : { data: [] }
-
-    const mapped = (colabData || []).map((c: any) => ({
-      ...c,
-      registros_exames: (registrosData || [])
-        .filter((r: any) => r.matricula_colaborador === c.matricula)
-        .map((r: any) => ({ ...r, programacoes: r.programacoes_exames || [] })),
-    }))
-    setColaboradores(mapped as unknown as Colaborador[])
-    console.log('colabData:', colabData?.length, 'registrosData:', registrosData?.length, 'mapped:', mapped.length)
-    setCarregando(false)
+    const { data: colabData } = await colabQuery
+    if (!colabData || colabData.length === 0) break
+    todosColabs = [...todosColabs, ...colabData]
+    if (colabData.length < pageSize) break
+    from += pageSize
   }
 
-  useEffect(() => { buscarColaboradores() }, [filtroBase, filtroSituacao, filtroGerencia])
+  const matriculas = todosColabs.map((c: any) => c.matricula)
+  const regraIds = nrsParaBuscar.map(n => n.id)
+  const { data: registrosData } = matriculas.length > 0 && regraIds.length > 0
+    ? await supabase.from('registros_exames').select(`
+        id, matricula_colaborador, regra_id, data_realizacao, data_vencimento, url_arquivo,
+        logs_auditoria (id, auditor_email, data_auditoria, validado, observacao),
+        programacoes_exames (id, data_programada, observacao, criado_por, created_at)
+      `).eq('is_atual', true).in('regra_id', regraIds).in('matricula_colaborador', matriculas)
+    : { data: [] }
 
+  const mapped = todosColabs.map((c: any) => ({
+    ...c,
+    registros_exames: (registrosData || [])
+      .filter((r: any) => r.matricula_colaborador === c.matricula)
+      .map((r: any) => ({ ...r, programacoes: r.programacoes_exames || [] })),
+  }))
+  setColaboradores(mapped as unknown as Colaborador[])
+  setCarregando(false)
+}
+
+useEffect(() => { buscarColaboradores() }, [filtroBase, filtroSituacao, filtroGerencia])
   function toggleOrdem(coluna: OrdemColuna) {
     if (ordemColuna === coluna) setOrdemDirecao(d => d === 'asc' ? 'desc' : 'asc')
     else { setOrdemColuna(coluna); setOrdemDirecao('asc') }
