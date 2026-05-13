@@ -579,11 +579,32 @@ export default function BaseNRPage() {
     })
 
     const mats = colabsFiltrados.map((c: any) => c.matricula); const rids = nrsB.map(n => n.id)
-    const { data: regs } = mats.length > 0 && rids.length > 0
-      ? await supabase.from('registros_exames')
-        .select('id,matricula_colaborador,regra_id,data_realizacao,data_vencimento,url_arquivo,logs_auditoria(id,auditor_email,data_auditoria,validado,observacao),programacoes_exames(id,data_programada,observacao,criado_por,created_at)')
-        .eq('is_atual', true).in('regra_id', rids).in('matricula_colaborador', mats)
-      : { data: [] }
+    
+    // ─── INÍCIO DA CORREÇÃO: BUSCA EM LOTES ─────────────────────────────
+    let regs: any[] = []
+    
+    if (mats.length > 0 && rids.length > 0) {
+      const LOTE = 100
+      for (let i = 0; i < mats.length; i += LOTE) {
+        const loteMats = mats.slice(i, i + LOTE)
+        let fromReg = 0
+        
+        while (true) {
+          const { data: rd } = await supabase.from('registros_exames')
+            .select('id,matricula_colaborador,regra_id,data_realizacao,data_vencimento,url_arquivo,logs_auditoria(id,auditor_email,data_auditoria,validado,observacao),programacoes_exames(id,data_programada,observacao,criado_por,created_at)')
+            .eq('is_atual', true)
+            .in('regra_id', rids)
+            .in('matricula_colaborador', loteMats)
+            .range(fromReg, fromReg + 499)
+            
+          if (!rd || rd.length === 0) break
+          regs = [...regs, ...rd]
+          if (rd.length < 500) break
+          fromReg += 500
+        }
+      }
+    }
+    // ─── FIM DA CORREÇÃO ────────────────────────────────────────────────
 
     setColabs(colabsFiltrados.map((c: any) => ({
       ...c,
