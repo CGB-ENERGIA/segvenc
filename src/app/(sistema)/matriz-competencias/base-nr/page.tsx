@@ -55,7 +55,7 @@ function getObrigatoriedade(matriz: MatrizTreinamento[], funcaoColab: string | n
 }
 
 function calcStats(colabs: Colaborador[], nrs: NR[], colunasVisiveis: string[], matriz: MatrizTreinamento[]) {
-  let v = 0, p = 0, vc = 0
+  let v = 0, p = 0, vc = 0, prog = 0
   colabs.forEach(c => {
     nrs.filter(nr => colunasVisiveis.includes(`nr_${nr.id}`)).forEach(nr => {
       if (getObrigatoriedade(matriz, c.funcoes?.nome || null, c.processo, nr.nome) !== 'SIM') return
@@ -63,11 +63,16 @@ function calcStats(colabs: Colaborador[], nrs: NR[], colunasVisiveis: string[], 
       if (!r) { vc++; return }
       if (nr.validade_dias === null) { v++; return }
       const s = getStatus(r.data_vencimento!)
-      if (s === 'valido') v++; else if (s === 'proximo') p++; else vc++
+      if (s === 'valido') v++
+      else if (s === 'proximo') p++
+      else vc++
+      if ((s === 'proximo' || s === 'vencido') && (r.programacoes || []).some(p => p.data_programada >= hoje)) prog++
     })
   })
-  return { validos: v, proximos: p, vencidos: vc }
+  return { validos: v, proximos: p, vencidos: vc, programados: prog }
 }
+
+const hoje = new Date().toISOString().split('T')[0]
 
 // ─── EXPORTAÇÃO ──────────────────────────────────────────────────────────────
 function gerarExport(colabs: Colaborador[], nrs: NR[], matriz: MatrizTreinamento[]) {
@@ -498,7 +503,7 @@ export default function BaseNRPage() {
   const [situacoesDisponiveis, setSituacoesDisp] = useState<string[]>([])
   const [filtroGer, setFiltroGer] = useState('')
   const [filtroSup, setFiltroSup] = useState('')
-  const [filtroStatus, setFiltroStatus] = useState<'valido' | 'proximo' | 'vencido' | null>(null)
+  const [filtroStatus, setFiltroStatus] = useState<'valido' | 'proximo' | 'vencido' | 'programado' | null>(null)
   const [compacto, setCompacto] = useState(false)
   const [colunas, setColunas] = useState<string[]>([])
   const [ordCol, setOrdCol] = useState<OrdemColuna>('nome')
@@ -610,13 +615,18 @@ export default function BaseNRPage() {
         if (nr.validade_dias === null) return true
         return getStatus(r.data_vencimento!) === 'valido'
       })
-      return nrsVis.some(nr => {
-        if (getObrigatoriedade(matriz, c.funcoes?.nome || null, c.processo, nr.nome) !== 'SIM') return false
-        const r = c.registros_exames.find(r => r.regra_id === nr.id)
-        if (!r) return filtroStatus === 'vencido'
-        if (nr.validade_dias === null) return false
-        return getStatus(r.data_vencimento!) === filtroStatus
-      })
+   return nrsVis.some(nr => {
+  if (getObrigatoriedade(matriz, c.funcoes?.nome || null, c.processo, nr.nome) !== 'SIM') return false
+  const r = c.registros_exames.find(r => r.regra_id === nr.id)
+  if (filtroStatus === 'programado') {
+    if (!r || nr.validade_dias === null) return false
+    const s = getStatus(r.data_vencimento!)
+    return (s === 'proximo' || s === 'vencido') && (r.programacoes || []).some(p => p.data_programada >= hoje)
+  }
+  if (!r) return filtroStatus === 'vencido'
+  if (nr.validade_dias === null) return false
+  return getStatus(r.data_vencimento!) === filtroStatus
+})
     })
   }, [semStatus, filtroStatus, nrs, colunas, matriz])
 
@@ -666,27 +676,27 @@ export default function BaseNRPage() {
       <p style={{ fontSize: 12, color: '#888', margin: '3px 0 0', fontWeight: 500 }}>BASE NR — Normas Regulamentadoras</p>
     </div>
 
-    {/* CARDS */}
-    {loading || nrs.length === 0
-      ? <div style={{ display: 'flex', gap: 12, marginBottom: 12, overflowX: 'auto', paddingBottom: 4 }}>
-        {[...Array(4)].map((_, i) => <div key={i} style={{ backgroundColor: 'white', borderRadius: 10, padding: '10px 16px', border: '1px solid #f0f0f0', minWidth: 160, flex: '1 0 160px' }}><div style={{ height: 10, backgroundColor: '#f0f0f0', borderRadius: 4, marginBottom: 8, width: '60%' }} /><div style={{ height: 24, backgroundColor: '#f0f0f0', borderRadius: 4, width: '40%' }} /></div>)}
-      </div>
-      : <div style={{ display: 'flex', gap: 12, marginBottom: 12, overflowX: 'auto', paddingBottom: 4 }}>
-        {[
-          { label: 'Colaboradores', valor: filtrados.length, cor: '#4a4a49', status: null },
-          { label: 'Treinamentos Válidos', valor: stats.validos, cor: '#16a34a', status: 'valido' as const },
-          { label: 'Próx. do Vencimento', valor: stats.proximos, cor: '#d97706', status: 'proximo' as const },
-          { label: 'Falta / Vencidos', valor: stats.vencidos, cor: '#dc2626', status: 'vencido' as const },
-        ].map((card, i) => {
-          const ativo = filtroStatus === card.status && card.status !== null
-          return <div key={i} onClick={() => card.status !== null && setFiltroStatus(ativo ? null : card.status)}
-            style={{ backgroundColor: ativo ? card.cor + '10' : 'white', borderRadius: 10, padding: '10px 16px', border: ativo ? `2px solid ${card.cor}` : '1px solid #f0f0f0', minWidth: 160, flex: '1 0 160px', cursor: card.status !== null ? 'pointer' : 'default', transition: 'all 0.15s ease', boxShadow: ativo ? `0 2px 8px ${card.cor}30` : 'none' }}>
-            <p style={{ fontSize: 11, color: '#888', margin: '0 0 4px' }}>{card.label}{ativo && <span style={{ marginLeft: 6, fontSize: 10, color: card.cor }}>● filtrado</span>}</p>
-            <p style={{ fontSize: 24, fontWeight: 600, color: card.cor, margin: 0 }}>{card.valor.toLocaleString('pt-BR')}</p>
-          </div>
-        })}
-      </div>}
-
+  {/* CARDS */}
+{loading || nrs.length === 0
+  ? <div style={{ display: 'flex', gap: 12, marginBottom: 12, overflowX: 'auto', paddingBottom: 4 }}>
+      {[...Array(5)].map((_, i) => <div key={i} style={{ backgroundColor: 'white', borderRadius: 10, padding: '10px 16px', border: '1px solid #f0f0f0', minWidth: 160, flex: '1 0 160px' }}><div style={{ height: 10, backgroundColor: '#f0f0f0', borderRadius: 4, marginBottom: 8, width: '60%' }} /><div style={{ height: 24, backgroundColor: '#f0f0f0', borderRadius: 4, width: '40%' }} /></div>)}
+    </div>
+  : <div style={{ display: 'flex', gap: 12, marginBottom: 12, overflowX: 'auto', paddingBottom: 4 }}>
+      {[
+        { label: 'Colaboradores', valor: filtrados.length, cor: '#4a4a49', status: null },
+        { label: 'Treinamentos Válidos', valor: stats.validos, cor: '#16a34a', status: 'valido' as const },
+        { label: 'Próx. do Vencimento', valor: stats.proximos, cor: '#d97706', status: 'proximo' as const },
+        { label: 'Falta / Vencidos', valor: stats.vencidos, cor: '#dc2626', status: 'vencido' as const },
+        { label: 'Programados', valor: stats.programados, cor: '#7c3aed', status: 'programado' as const },
+      ].map((card, i) => {
+        const ativo = filtroStatus === card.status && card.status !== null
+        return <div key={i} onClick={() => card.status !== null && setFiltroStatus(ativo ? null : card.status)}
+          style={{ backgroundColor: ativo ? card.cor + '10' : 'white', borderRadius: 10, padding: '10px 16px', border: ativo ? `2px solid ${card.cor}` : '1px solid #f0f0f0', minWidth: 160, flex: '1 0 160px', cursor: card.status !== null ? 'pointer' : 'default', transition: 'all 0.15s ease', boxShadow: ativo ? `0 2px 8px ${card.cor}30` : 'none' }}>
+          <p style={{ fontSize: 11, color: '#888', margin: '0 0 4px' }}>{card.label}{ativo && <span style={{ marginLeft: 6, fontSize: 10, color: card.cor }}>● filtrado</span>}</p>
+          <p style={{ fontSize: 24, fontWeight: 600, color: card.cor, margin: 0 }}>{card.valor.toLocaleString('pt-BR')}</p>
+        </div>
+      })}
+    </div>}
     {/* FILTROS */}
     <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap', alignItems: 'center' }}>
       <input type="text" placeholder="Nome ou matrícula..." value={busca} onChange={e => setBusca(e.target.value)} style={{ ...sel, width: 200, padding: '0 12px' }} />

@@ -64,18 +64,22 @@ function isNACompleto(colab: Colaborador, treinamentos: Treinamento[], colunasVi
 }
 
 function calcStats(colabs: Colaborador[], treinamentos: Treinamento[]) {
-  let v = 0, p = 0, vc = 0
+  let v = 0, p = 0, vc = 0, prog = 0
   colabs.forEach(c => {
     treinamentos.forEach(t => {
       if (getObrig(c, t.nome) !== 'SIM') return
       const r = c.registros_exames.find(r => r.regra_id === t.id)
       if (!r) { vc++; return }
       const s = getStatus(r.data_vencimento)
-      if (s === 'valido') v++; else if (s === 'proximo') p++; else vc++
+      if (s === 'valido') v++
+      else if (s === 'proximo') p++
+      else vc++
+      if ((s === 'proximo' || s === 'vencido') && (r.programacoes || []).some(p => p.data_programada >= hoje)) prog++
     })
   })
-  return { validos: v, proximos: p, vencidos: vc }
+  return { validos: v, proximos: p, vencidos: vc, programados: prog }
 }
+const hoje = new Date().toISOString().split('T')[0]
 
 // ─── EXPORTAÇÃO ──────────────────────────────────────────────────────────────
 function gerarExport(colabs: Colaborador[], treinamentos: Treinamento[]) {
@@ -518,7 +522,7 @@ export default function BasePOPage() {
   const [filtroSits, setFiltroSits] = useState<string[]>([])
   const [situacoesDisp, setSituacoesDisp] = useState<string[]>([])
   const [filtroSup, setFiltroSup] = useState('')
-  const [filtroStatus, setFiltroStatus] = useState<'valido' | 'proximo' | 'vencido' | null>(null)
+  const [filtroStatus, setFiltroStatus] = useState<'valido' | 'proximo' | 'vencido' | 'programado' | null>(null)
   // Filtro N/A: por padrão oculta colaboradores N/A em todas as colunas visíveis
   const [ocultarNACompleto, setOcultarNACompleto] = useState(true)
   const [compacto, setCompacto] = useState(false)
@@ -634,12 +638,17 @@ export default function BasePOPage() {
         const r = c.registros_exames.find(r => r.regra_id === t.id); if (!r) return false
         return getStatus(r.data_vencimento) === 'valido'
       })
-      return treinamentos.some(t => {
-        if (getObrig(c, t.nome) !== 'SIM') return false
-        const r = c.registros_exames.find(r => r.regra_id === t.id)
-        if (!r) return filtroStatus === 'vencido'
-        return getStatus(r.data_vencimento) === filtroStatus
-      })
+     return treinamentos.some(t => {
+      if (getObrig(c, t.nome) !== 'SIM') return false
+         const r = c.registros_exames.find(r => r.regra_id === t.id)
+        if (filtroStatus === 'programado') {
+        if (!r) return false
+         const s = getStatus(r.data_vencimento)
+    return (s === 'proximo' || s === 'vencido') && (r.programacoes || []).some(p => p.data_programada >= hoje)
+  }
+  if (!r) return filtroStatus === 'vencido'
+  return getStatus(r.data_vencimento) === filtroStatus
+})
     })
   }, [semStatus, filtroStatus, treinamentos])
 
@@ -706,11 +715,12 @@ export default function BasePOPage() {
       </div>
       : <div style={{ display: 'flex', gap: 12, marginBottom: 12, overflowX: 'auto', paddingBottom: 4 }}>
         {[
-          { label: 'Colaboradores',       valor: filtrados.length, cor: '#4a4a49', status: null },
-          { label: 'Treinamentos Válidos', valor: stats.validos,   cor: '#16a34a', status: 'valido'  as const },
-          { label: 'Próx. do Vencimento',  valor: stats.proximos,  cor: '#d97706', status: 'proximo' as const },
-          { label: 'Falta / Vencidos',     valor: stats.vencidos,  cor: '#dc2626', status: 'vencido' as const },
-        ].map((card, i) => {
+  { label: 'Colaboradores',        valor: filtrados.length, cor: '#4a4a49', status: null },
+  { label: 'Treinamentos Válidos', valor: stats.validos,    cor: '#16a34a', status: 'valido'     as const },
+  { label: 'Próx. do Vencimento',  valor: stats.proximos,   cor: '#d97706', status: 'proximo'    as const },
+  { label: 'Falta / Vencidos',     valor: stats.vencidos,   cor: '#dc2626', status: 'vencido'    as const },
+  { label: 'Programados',          valor: stats.programados, cor: '#7c3aed', status: 'programado' as const },
+].map((card, i) => {
           const ativo = filtroStatus === card.status && card.status !== null
           return <div key={i} onClick={() => card.status !== null && setFiltroStatus(ativo ? null : card.status)}
             style={{ backgroundColor: ativo ? card.cor + '10' : 'white', borderRadius: 10, padding: '10px 16px', border: ativo ? `2px solid ${card.cor}` : '1px solid #f0f0f0', minWidth: 160, flex: '1 0 160px', cursor: card.status !== null ? 'pointer' : 'default', transition: 'all 0.15s ease', boxShadow: ativo ? `0 2px 8px ${card.cor}30` : 'none' }}>
