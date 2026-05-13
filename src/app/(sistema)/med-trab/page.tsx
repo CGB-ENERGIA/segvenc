@@ -21,6 +21,9 @@ const TIPOS_ASO = [
 ]
 
 // ─── TIPOS ────────────────────────────────────────────────────────────────────
+interface LogAuditoria { id: string; auditor_email: string; data_auditoria: string; validado: boolean; observacao: string | null }
+interface ProgramacaoASO { id: string; data_programada: string; observacao: string | null; criado_por: string; created_at: string }
+
 interface ASO {
   id: string
   tipo: string
@@ -29,6 +32,8 @@ interface ASO {
   gse: number | null
   observacao: string | null
   url_arquivo: string | null
+  logs_auditoria: LogAuditoria[]
+  programacoes: ProgramacaoASO[]
 }
 
 interface Colaborador {
@@ -53,7 +58,7 @@ type OrdemColuna =
   | 'funcao' | 'processo' | 'gse'
   | 'admissional' | 'periodico' | 'retorno' | 'mro' | 'demissional' | 'status'
 type OrdemDirecao = 'asc' | 'desc'
-type AbaModal = 'info' | 'documento' | 'auditoria'
+type AbaModal = 'info' | 'documento' | 'programacao' | 'auditoria'
 
 // ─── HELPERS ──────────────────────────────────────────────────────────────────
 function formatarData(d: string | null | undefined): string {
@@ -87,10 +92,9 @@ function getStatusColaborador(col: Colaborador): StatusASO {
 }
 
 function temProgramado(col: Colaborador): boolean {
-  const p = getASOPorTipo(col.asos, 'periodico')
-  if (!p?.data_vencimento) return false
-  const dias = calcularDias(p.data_vencimento)
-  return dias !== null && dias > 0 && dias <= 365
+  return col.asos.some(a =>
+    (a.programacoes || []).length > 0
+  )
 }
 
 function statusCores(s: StatusASO): { bg: string; text: string } {
@@ -305,6 +309,8 @@ function Icone({ tipo, cor, titulo, size = 16 }: { tipo: string; cor: string; ti
     check: 'M22 11.08V12a10 10 0 11-5.93-9.14M22 4L12 14.01l-3-3',
     x_circulo: 'M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10zM15 9l-6 6M9 9l6 6',
     olho: 'M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8zM12 9a3 3 0 100 6 3 3 0 000-6z',
+    relogio: 'M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10zM12 6v6l4 2',
+    calendario: 'M19 4H5a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2V6a2 2 0 00-2-2zM16 2v4M8 2v4M3 10h18',
     upload: 'M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12',
     plus: 'M12 5v14M5 12h14',
   }
@@ -317,10 +323,11 @@ function Icone({ tipo, cor, titulo, size = 16 }: { tipo: string; cor: string; ti
 }
 
 // ─── CÉLULA ASO ───────────────────────────────────────────────────────────────
-function CelulaASO({ aso, tipo, onClick, compacto }: {
+function CelulaASO({ aso, tipo, onClick, onCalendario, compacto }: {
   aso: ASO | null
   tipo: string
   onClick: () => void
+  onCalendario: () => void
   compacto: boolean
 }) {
   const pad = compacto ? '6px 8px' : '8px 12px'
@@ -341,37 +348,55 @@ function CelulaASO({ aso, tipo, onClick, compacto }: {
   )
 
   const semVenc = TIPOS_SEM_VENCIMENTO.includes(tipo)
-
-  if (semVenc) return (
-    <td style={{ ...base, backgroundColor: '#f0fdf4' }} onClick={onClick}>
-      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3 }}>
-        <Icone tipo="check" cor="#16a34a" size={13} />
-        <span style={{ fontSize: compacto ? 10 : 11, color: '#16a34a', fontWeight: 600 }}>{formatarData(aso.data_realizacao)}</span>
-        {aso.url_arquivo && <Icone tipo="clipe" cor="#2563eb" size={12} titulo="Com documento" />}
+  const temArq = !!aso.url_arquivo
+  const aud = [...(aso.logs_auditoria || [])].sort((a, b) => new Date(b.data_auditoria).getTime() - new Date(a.data_auditoria).getTime())[0]
+  const prog = [...(aso.programacoes || [])].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0]
+ if (semVenc) return (
+  <td style={{ ...base, backgroundColor: '#f0fdf4' }} onClick={onClick}>
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
+      <span style={{ fontSize: compacto ? 10 : 11, color: '#555' }}>{formatarData(aso.data_realizacao)}</span>
+      <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+        <Icone tipo="clipe" cor={temArq ? '#2563eb' : '#9ca3af'} size={13} />
+        {!aud && <Icone tipo="relogio" cor="#9ca3af" titulo="Pendente" size={13} />}
+        {aud?.validado && <Icone tipo="check" cor="#16a34a" titulo="Validado" size={13} />}
+        {aud && !aud.validado && <Icone tipo="x_circulo" cor="#dc2626" titulo="Reprovado" size={13} />}
       </div>
-    </td>
-  )
+    </div>
+  </td>
+)
 
   const status = getStatusASO(aso.data_vencimento)
   const cores = statusCores(status)
   const bgMap: Record<StatusASO, string> = {
     no_prazo: '#f0fdf4', critico: '#fefce8', atencao: '#fff7ed', vencido: '#fef2f2', sem_aso: '#fafafa',
   }
+  const dias = calcularDias(aso.data_vencimento)
 
   return (
     <td style={{ ...base, backgroundColor: bgMap[status] }} onClick={onClick}>
-      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3 }}>
-        <span style={{ fontSize: compacto ? 10 : 11, color: '#555' }}>{formatarData(aso.data_realizacao)}</span>
-        <span style={{ fontSize: compacto ? 10 : 11, fontWeight: 600, padding: '1px 6px', borderRadius: 99, backgroundColor: cores.bg, color: cores.text }}>
-          Vence {formatarData(aso.data_vencimento)}
-        </span>
-        {aso.url_arquivo && <Icone tipo="clipe" cor="#2563eb" size={12} titulo="Com documento" />}
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
+        <span style={{ fontSize: compacto ? 10 : 11, color: '#555' }}>{formatarData(aso.data_vencimento)}</span>
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+          <Icone tipo="clipe" cor={temArq ? '#2563eb' : '#9ca3af'} size={13} />
+          {!aud && <Icone tipo="relogio" cor="#9ca3af" titulo="Pendente" size={13} />}
+          {aud?.validado && <Icone tipo="check" cor="#16a34a" titulo="Validado" size={13} />}
+          {aud && !aud.validado && <Icone tipo="x_circulo" cor="#dc2626" titulo="Reprovado" size={13} />}
+          {dias !== null && dias <= 60 && (
+          <span
+          title={prog ? `Prog: ${formatarData(prog.data_programada)}` : 'Não programado'}
+          onClick={e => { e.stopPropagation(); onCalendario() }}
+          style={{ cursor: 'pointer', display: 'flex' }}>
+          <Icone tipo="calendario" cor={prog ? '#7c3aed' : '#9ca3af'} size={13} />
+         </span>
+)}
+        </div>
+        {prog && <span style={{ fontSize: 10, color: '#7c3aed', fontStyle: 'italic' }}>Prog: {formatarData(prog.data_programada)}</span>}
       </div>
     </td>
   )
 }
 
-// ─── MODAL ASO (abas: info, documento, auditoria) ─────────────────────────────
+// ─── MODAL ASO (abas: info, documento, programacao, auditoria) ────────────────
 function ModalASO({ dados, abaInicial, onClose, onUpdate, email, podeAuditar, nivel }: {
   dados: { colab: Colaborador; aso: ASO | null; tipo: string }
   abaInicial: AbaModal
@@ -392,6 +417,11 @@ function ModalASO({ dados, abaInicial, onClose, onUpdate, email, podeAuditar, ni
   const [confNome, setConfNome] = useState('')
   const [excluindo, setExcluindo] = useState(false)
   const [errExc, setErrExc] = useState('')
+  // ── Programação ──
+  const [progs, setProgs] = useState<ProgramacaoASO[]>(dados.aso?.programacoes || [])
+  const [formProg, setFormProg] = useState({ data_programada: '', observacao: '' })
+  const [salvProg, setSalvProg] = useState(false)
+  const [errProg, setErrProg] = useState('')
   const fileRef = useRef<HTMLInputElement>(null)
 
   const { colab, aso, tipo } = dados
@@ -411,12 +441,29 @@ function ModalASO({ dados, abaInicial, onClose, onUpdate, email, podeAuditar, ni
     setArquivo(null); setUploading(false); onUpdate(); onClose()
   }
 
+  async function salvarProg() {
+    if (!aso || !formProg.data_programada) { setErrProg('Informe a data.'); return }
+    setSalvProg(true); setErrProg('')
+    const { data, error } = await supabase.from('programacoes_exames').insert({
+      aso_id: aso.id,
+      matricula_colaborador: colab.matricula,
+      data_programada: formProg.data_programada,
+      observacao: formProg.observacao || null,
+      criado_por: email,
+    }).select().single()
+    if (error) { setErrProg(error.message); setSalvProg(false); return }
+    setProgs(p => [{ ...data }, ...p])
+    setFormProg({ data_programada: '', observacao: '' })
+    setSalvProg(false)
+    onUpdate()
+  }
+
   async function salvarAud() {
     if (!aso) return
     if (!formAud.validado && !formAud.observacao) { setErrAud('Informe o motivo.'); return }
     setSalvAud(true); setErrAud('')
     const { error } = await supabase.from('logs_auditoria').insert({
-      registro_id: aso.id, auditor_email: email,
+      aso_id: aso.id, auditor_email: email,
       validado: formAud.validado, observacao: formAud.observacao || null,
       data_auditoria: new Date().toISOString(),
     })
@@ -436,6 +483,7 @@ function ModalASO({ dados, abaInicial, onClose, onUpdate, email, podeAuditar, ni
   const abas: { key: AbaModal; label: string }[] = [
     { key: 'info', label: 'Informações' },
     { key: 'documento', label: 'Documento' },
+    { key: 'programacao', label: 'Programação' },
     ...(podeAuditar ? [{ key: 'auditoria' as AbaModal, label: 'Auditoria' }] : []),
   ]
 
@@ -582,6 +630,46 @@ function ModalASO({ dados, abaInicial, onClose, onUpdate, email, podeAuditar, ni
                   )}
                 </>
               )}
+            </div>
+          )}
+
+          {/* ABA: PROGRAMAÇÃO */}
+          {aba === 'programacao' && (
+            <div>
+              <div style={{ backgroundColor: '#f9f9f9', borderRadius: 10, padding: 16, marginBottom: 24 }}>
+                <p style={{ fontSize: 13, fontWeight: 600, color: '#333', margin: '0 0 14px' }}>Nova programação</p>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
+                  <div>
+                    <label style={{ fontSize: 12, color: '#666', display: 'block', marginBottom: 4 }}>Data programada *</label>
+                    <input type="date" value={formProg.data_programada} onChange={e => setFormProg(f => ({ ...f, data_programada: e.target.value }))} style={inp} />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 12, color: '#666', display: 'block', marginBottom: 4 }}>Observação</label>
+                    <input type="text" value={formProg.observacao} onChange={e => setFormProg(f => ({ ...f, observacao: e.target.value }))} placeholder="Opcional..." style={inp} />
+                  </div>
+                </div>
+                {errProg && <p style={{ fontSize: 12, color: '#dc2626', margin: '0 0 8px' }}>{errProg}</p>}
+                <button onClick={salvarProg} disabled={salvProg || !aso} style={{ height: 36, padding: '0 20px', backgroundColor: COR, color: 'white', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 500, cursor: salvProg || !aso ? 'not-allowed' : 'pointer', opacity: salvProg || !aso ? 0.7 : 1 }}>
+                  {salvProg ? 'Salvando...' : 'Programar'}
+                </button>
+              </div>
+              <p style={{ fontSize: 13, fontWeight: 600, color: '#333', margin: '0 0 12px' }}>Histórico</p>
+              {progs.length === 0
+                ? <p style={{ fontSize: 13, color: '#aaa' }}>Nenhuma programação registrada.</p>
+                : progs.map((p, i) => (
+                    <div key={p.id} style={{ border: '1px solid #f0f0f0', borderRadius: 8, padding: '10px 14px', marginBottom: 8, borderLeft: '3px solid #7c3aed' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                        <span style={{ fontSize: 13, fontWeight: 500, color: '#7c3aed' }}>
+                          📅 {formatarData(p.data_programada)}
+                          {i === 0 && <span style={{ fontSize: 10, color: '#aaa', marginLeft: 8 }}>mais recente</span>}
+                        </span>
+                        <span style={{ fontSize: 11, color: '#aaa' }}>{new Date(p.created_at).toLocaleString('pt-BR')}</span>
+                      </div>
+                      <p style={{ fontSize: 12, color: '#666', margin: 0 }}>Por: {p.criado_por}</p>
+                      {p.observacao && <p style={{ fontSize: 12, color: '#888', margin: '4px 0 0', fontStyle: 'italic' }}>{p.observacao}</p>}
+                    </div>
+                  ))
+              }
             </div>
           )}
 
@@ -781,7 +869,7 @@ export default function MedTrabPage() {
   const [compacto, setCompacto] = useState(false)
   const [colunas, setColunas] = useState<string[]>([
     'matricula', 'nome', 'base', 'situacao', 'admissao', 'funcao',
-    'processo', 'gse', 'admissional', 'periodico', 'retorno', 'mro', 'demissional', 'status',
+    'processo', 'gse', 'admissional', 'periodico', 'retorno', 'mro', 'demissional',
   ])
   const [ordCol, setOrdCol] = useState<OrdemColuna>('nome')
   const [ordDir, setOrdDir] = useState<OrdemDirecao>('asc')
@@ -838,22 +926,37 @@ export default function MedTrabPage() {
       todos = todos.filter((c: any) => sitsIniciais.includes(c.situacao))
     }
 
-    // Query 2: ASOs filtrados pelas matrículas
-    const mats = todos.map((c: any) => c.matricula)
-    let asosData: any[] = []
-    if (mats.length > 0) {
-      const { data: aData } = await supabase
-        .from('asos')
-        .select('id, matricula_colaborador, tipo, data_realizacao, data_vencimento, gse, observacao, url_arquivo')
-        .in('matricula_colaborador', mats)
-      if (aData) asosData = aData
-    }
+   // Query 2: ASOs paginados
+const mats = todos.map((c: any) => c.matricula)
+let asosData: any[] = []
+if (mats.length > 0) {
+  let fromA = 0
+  while (true) {
+    const { data: aData } = await supabase
+      .from('asos')
+      .select(`
+        id, matricula_colaborador, tipo, data_realizacao, data_vencimento, gse, observacao, url_arquivo,
+        logs_auditoria(id, auditor_email, data_auditoria, validado, observacao),
+        programacoes_exames(id, data_programada, observacao, criado_por, created_at)
+      `)
+      .in('matricula_colaborador', mats)
+      .range(fromA, fromA + 499)
+    if (!aData || aData.length === 0) break
+    asosData = [...asosData, ...aData]
+    if (aData.length < 500) break
+    fromA += 500
+  }
+}
 
     // Join no JavaScript
-    setColabs(todos.map((c: any) => ({
-      ...c,
-      asos: asosData.filter((a: any) => a.matricula_colaborador === c.matricula),
-    })) as Colaborador[])
+  setColabs(todos.map((c: any) => ({
+  ...c,
+  asos: asosData.filter((a: any) => a.matricula_colaborador === c.matricula).map((a: any) => ({
+    ...a,
+    logs_auditoria: a.logs_auditoria || [],
+    programacoes: a.programacoes_exames || [],
+  })),
+})) as Colaborador[])
     setLoading(false)
   }
 
@@ -951,7 +1054,6 @@ export default function MedTrabPage() {
     { key: 'retorno',     label: 'Retorno' },
     { key: 'mro',         label: 'MRO' },
     { key: 'demissional', label: 'Demissional' },
-    { key: 'status',      label: 'Status' },
   ]
 
   const sel: React.CSSProperties = { height: 36, border: '1px solid #e0e0e0', borderRadius: 8, padding: '0 10px', fontSize: 13, backgroundColor: 'white', color: '#555' }
@@ -1044,7 +1146,6 @@ export default function MedTrabPage() {
                   {vis('retorno')     && <Th label="Retorno"    col="retorno"     ord={ordCol} dir={ordDir} onClick={toggleOrd} style={{ textAlign: 'center' }} />}
                   {vis('mro')         && <Th label="MRO"        col="mro"         ord={ordCol} dir={ordDir} onClick={toggleOrd} style={{ textAlign: 'center' }} />}
                   {vis('demissional') && <Th label="Demissional" col="demissional" ord={ordCol} dir={ordDir} onClick={toggleOrd} style={{ textAlign: 'center' }} />}
-                  {vis('status')      && <Th label="Status"     col="status"      ord={ordCol} dir={ordDir} onClick={toggleOrd} />}
                 </tr>
               </thead>
               <tbody>
@@ -1084,21 +1185,24 @@ export default function MedTrabPage() {
                             </td>
                           )}
                           {vis('admissao')  && <td style={tdBase()}>{formatarData(c.data_admissao)}</td>}
-                          {vis('funcao')    && <td style={tdBase()}>{c.funcoes?.nome || '—'}</td>}
-                          {vis('processo')  && <td style={tdBase()}>{c.processo || '—'}</td>}
-                          {vis('gse')       && <td style={tdBase({ textAlign: 'center' })}>{asoPer?.gse ?? '—'}</td>}
-                          {vis('admissional') && <CelulaASO aso={asoAdm} tipo="admissional" compacto={compacto} onClick={() => setModalASO({ colab: c, aso: asoAdm, tipo: 'admissional', abaInicial: 'info' })} />}
-                          {vis('periodico')   && <CelulaASO aso={asoPer} tipo="periodico"   compacto={compacto} onClick={() => setModalASO({ colab: c, aso: asoPer, tipo: 'periodico',   abaInicial: 'info' })} />}
-                          {vis('retorno')     && <CelulaASO aso={asoRet} tipo="retorno"     compacto={compacto} onClick={() => setModalASO({ colab: c, aso: asoRet, tipo: 'retorno',     abaInicial: 'info' })} />}
-                          {vis('mro')         && <CelulaASO aso={asoMRO} tipo="mudanca_risco" compacto={compacto} onClick={() => setModalASO({ colab: c, aso: asoMRO, tipo: 'mudanca_risco', abaInicial: 'info' })} />}
-                          {vis('demissional')  && <CelulaASO aso={asoDem} tipo="demissional" compacto={compacto} onClick={() => setModalASO({ colab: c, aso: asoDem, tipo: 'demissional', abaInicial: 'info' })} />}
-                          {vis('status') && (
-                            <td style={tdBase()}>
-                              <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 99, backgroundColor: cores.bg, color: cores.text, fontWeight: 600, whiteSpace: 'nowrap' }}>
-                                {statusLabel(status)}
-                              </span>
-                            </td>
-                          )}
+{vis('funcao')    && <td style={tdBase()}>{c.funcoes?.nome || '—'}</td>}
+{vis('processo')  && <td style={tdBase()}>{c.processo || '—'}</td>}
+{vis('gse')       && <td style={tdBase({ textAlign: 'center' })}>{asoPer?.gse ?? '—'}</td>}
+{vis('admissional') && <CelulaASO aso={asoAdm} tipo="admissional" compacto={compacto}
+  onClick={() => setModalASO({ colab: c, aso: asoAdm, tipo: 'admissional', abaInicial: 'info' })}
+  onCalendario={() => setModalASO({ colab: c, aso: asoAdm, tipo: 'admissional', abaInicial: 'programacao' })} />}
+{vis('periodico')   && <CelulaASO aso={asoPer} tipo="periodico" compacto={compacto}
+  onClick={() => setModalASO({ colab: c, aso: asoPer, tipo: 'periodico', abaInicial: 'info' })}
+  onCalendario={() => setModalASO({ colab: c, aso: asoPer, tipo: 'periodico', abaInicial: 'programacao' })} />}
+{vis('retorno')     && <CelulaASO aso={asoRet} tipo="retorno" compacto={compacto}
+  onClick={() => setModalASO({ colab: c, aso: asoRet, tipo: 'retorno', abaInicial: 'info' })}
+  onCalendario={() => setModalASO({ colab: c, aso: asoRet, tipo: 'retorno', abaInicial: 'programacao' })} />}
+{vis('mro')         && <CelulaASO aso={asoMRO} tipo="mudanca_risco" compacto={compacto}
+  onClick={() => setModalASO({ colab: c, aso: asoMRO, tipo: 'mudanca_risco', abaInicial: 'info' })}
+  onCalendario={() => setModalASO({ colab: c, aso: asoMRO, tipo: 'mudanca_risco', abaInicial: 'programacao' })} />}
+{vis('demissional')  && <CelulaASO aso={asoDem} tipo="demissional" compacto={compacto}
+  onClick={() => setModalASO({ colab: c, aso: asoDem, tipo: 'demissional', abaInicial: 'info' })}
+  onCalendario={() => setModalASO({ colab: c, aso: asoDem, tipo: 'demissional', abaInicial: 'programacao' })} />}
                         </tr>
                       )
                     })
