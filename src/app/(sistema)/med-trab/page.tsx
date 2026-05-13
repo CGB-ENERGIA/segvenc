@@ -1065,7 +1065,7 @@ if (mats.length > 0) {
     { key: 'critico'    as CardFiltro, label: 'Prazo Crítico',           valor: stats.critico,    cor: '#a16207' },
     { key: 'atencao'    as CardFiltro, label: 'Bernhoeft c/ Atenção',    valor: stats.atencao,    cor: '#c2410c' },
     { key: 'vencido'    as CardFiltro, label: 'Vencidos',                valor: stats.vencido,    cor: '#dc2626' },
-    { key: 'programado' as CardFiltro, label: 'Programado (≤365 dias)',  valor: stats.programado, cor: '#7c3aed' },
+    { key: 'programado' as CardFiltro, label: 'Programado',  valor: stats.programado, cor: '#7c3aed' },
   ]
 
   return (
