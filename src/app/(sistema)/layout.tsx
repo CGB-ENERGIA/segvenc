@@ -8,7 +8,7 @@ export default function SistemaLayout({
 }) {
   return (
     <AuthProvider>
-      <div style={{ display: 'flex', minHeight: '100vh', backgroundColor: '#f5f5f5' }}>
+      <div style={{ display: 'flex', minHeight: '100vh', backgroundColor: 'white' }}>
         <Sidebar />
         <main style={{
           marginLeft: 'var(--sidebar-width, 220px)',

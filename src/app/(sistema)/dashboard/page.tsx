@@ -3,9 +3,8 @@
 import { useEffect, useState, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts'
 
-// ─── CONSTANTES ───────────────────────────────────────────────────────────────
 const COR_PRIMARIA = '#9f183c'
 const COR_CARD = '#ffffff'
 const COR_TEXTO_PRINCIPAL = '#18181b'
@@ -20,10 +19,10 @@ const NRS_ALVO = ['NR 10-B', 'NR 11', 'NR 12', 'NR 35']
 const POS_ALVO = ['Direção Defensiva', 'Pilotagem Defensiva']
 const LOTE = 100
 
-// ─── TIPOS ────────────────────────────────────────────────────────────────────
 type AbaModulo = 'geral' | 'nr' | 'po' | 'medicina'
 type SituacaoNR = 'proximo' | 'vencido' | 'programado'
 type SituacaoMed = 'critico' | 'atencao' | 'vencido'
+type FiltroAtivo = { tipo: 'base' | 'gerencia' | 'supervisor'; valor: string } | null
 
 interface MatrizNR { funcao: string; processo: string | null; treinamento: string; obrigatorio: string }
 interface ColabNR {
@@ -47,7 +46,6 @@ interface StatsGeral {
   medNoPrazo: number; medCritico: number; medAtencao: number; medVencido: number; medProgramados: number
 }
 
-// ─── HELPERS ──────────────────────────────────────────────────────────────────
 function getDias(dv: string | null): number | null {
   if (!dv) return null
   return Math.ceil((new Date(dv + 'T12:00:00').getTime() - new Date().getTime()) / 86400000)
@@ -82,7 +80,6 @@ function getObrigatoriedade(matriz: MatrizNR[], funcao: string | null, processo:
   return 'NA'
 }
 
-// ─── CALC STATS ───────────────────────────────────────────────────────────────
 function calcStatsNR(colabs: ColabNR[], nrs: { id: number; nome: string; validade_dias: number | null }[], matriz: MatrizNR[]) {
   let v = 0, p = 0, vc = 0, prog = 0
   colabs.forEach(c => {
@@ -117,8 +114,19 @@ function calcStatsPO(colabs: ColabPO[], pos: { id: number; nome: string; validad
   })
   return { validos: v, proximos: p, vencidos: vc, programados: prog }
 }
+function calcStatsMed(colabs: ColabMed[]) {
+  let mNP = 0, mC = 0, mA = 0, mV = 0, mProg = 0
+  colabs.forEach(c => {
+    const st = getStatusMed(c.asoVencimento)
+    if (st === 'no_prazo') mNP++
+    else if (st === 'critico') mC++
+    else if (st === 'atencao') mA++
+    else if (st === 'vencido') mV++
+    if ((st === 'critico' || st === 'atencao' || st === 'vencido') && c.asoProgramacoes.some(d => d >= hoje)) mProg++
+  })
+  return { mNP, mC, mA, mV, mProg }
+}
 
-// ─── BUSCA EM LOTES ───────────────────────────────────────────────────────────
 async function buscarRegistrosEmLotes(
   matriculas: string[], regraIds: number[],
   map: Record<string, Record<number, { data_vencimento: string | null; programacoes: string[] }>>
@@ -145,22 +153,79 @@ async function buscarRegistrosEmLotes(
   }
 }
 
-// ─── TOOLTIP ──────────────────────────────────────────────────────────────────
+function contarNRPorGrupo(colabs: ColabNR[], nrs: { id: number; nome: string; validade_dias: number | null }[], matriz: MatrizNR[], agrup: 'base' | 'gerencia' | 'supervisor', situacao: SituacaoNR): { nome: string; total: number }[] {
+  const grupos: Record<string, number> = {}
+  colabs.forEach(c => {
+    const chave = agrup === 'base' ? c.base : agrup === 'gerencia' ? c.gerencia : c.supervisor
+    if (!chave) return
+    nrs.forEach(nr => {
+      if (getObrigatoriedade(matriz, c.funcao, c.processo, nr.nome) !== 'SIM') return
+      if (nr.validade_dias === null) return
+      const reg = c.registros[nr.id]
+      if (situacao === 'programado') {
+        if (!reg) return
+        const s = getStatus(reg.data_vencimento!)
+        if (!((s === 'proximo' || s === 'vencido') && reg.programacoes.some(d => d >= hoje))) return
+      } else if (situacao === 'proximo') {
+        if (!reg || getStatus(reg.data_vencimento!) !== 'proximo') return
+      } else {
+        if (reg && getStatus(reg.data_vencimento!) !== 'vencido') return
+      }
+      grupos[chave] = (grupos[chave] || 0) + 1
+    })
+  })
+  return Object.entries(grupos).map(([nome, total]) => ({ nome, total })).sort((a, b) => b.total - a.total)
+}
+
+function contarPOPorGrupo(colabs: ColabPO[], pos: { id: number; nome: string }[], agrup: 'base' | 'gerencia' | 'supervisor', situacao: SituacaoNR): { nome: string; total: number }[] {
+  const grupos: Record<string, number> = {}
+  colabs.forEach(c => {
+    const chave = agrup === 'base' ? c.base : agrup === 'gerencia' ? c.gerencia : c.supervisor
+    if (!chave) return
+    pos.forEach(po => {
+      const campo = po.nome === 'Direção Defensiva' ? c.direcao : c.pilotagem
+      if (campo !== 'SIM') return
+      const reg = c.registros[po.id]
+      if (situacao === 'programado') {
+        if (!reg) return
+        const s = getStatus(reg.data_vencimento!)
+        if (!((s === 'proximo' || s === 'vencido') && reg.programacoes.some(d => d >= hoje))) return
+      } else if (situacao === 'proximo') {
+        if (!reg || getStatus(reg.data_vencimento!) !== 'proximo') return
+      } else {
+        if (reg && getStatus(reg.data_vencimento!) !== 'vencido') return
+      }
+      grupos[chave] = (grupos[chave] || 0) + 1
+    })
+  })
+  return Object.entries(grupos).map(([nome, total]) => ({ nome, total })).sort((a, b) => b.total - a.total)
+}
+
+function contarMedPorGrupo(colabs: ColabMed[], agrup: 'base' | 'gerencia' | 'supervisor', situacao: SituacaoMed): { nome: string; total: number }[] {
+  const grupos: Record<string, number> = {}
+  colabs.forEach(c => {
+    const st = getStatusMed(c.asoVencimento)
+    if (st === 'sem_aso' || st === 'no_prazo' || st !== situacao) return
+    const chave = agrup === 'base' ? c.base : agrup === 'gerencia' ? c.gerencia : c.supervisor
+    if (!chave) return
+    grupos[chave] = (grupos[chave] || 0) + 1
+  })
+  return Object.entries(grupos).map(([nome, total]) => ({ nome, total })).sort((a, b) => b.total - a.total)
+}
+
+function corSituacaoNR(s: SituacaoNR) { return s === 'proximo' ? CORES_STATUS.laranja : s === 'vencido' ? CORES_STATUS.vermelho : CORES_STATUS.roxo }
+function corSituacaoMed(s: SituacaoMed) { return s === 'critico' ? CORES_STATUS.laranja : s === 'atencao' ? CORES_STATUS.amarelo : CORES_STATUS.vermelho }
+
 function CustomTooltip({ active, payload, label }: any) {
   if (!active || !payload?.length) return null
   return (
     <div style={{ backgroundColor: 'white', border: `1px solid ${COR_BORDA}`, borderRadius: 10, padding: '10px 14px', boxShadow: '0 8px 20px rgba(0,0,0,0.1)' }}>
-      <p style={{ fontWeight: 600, color: COR_TEXTO_PRINCIPAL, margin: '0 0 6px', fontSize: 12 }}>{label}</p>
-      {payload.map((p: any, i: number) => (
-        <div key={i} style={{ fontSize: 12, color: COR_TEXTO_SECUNDARIO }}>
-          Total: <strong style={{ color: p.fill }}>{p.value}</strong>
-        </div>
-      ))}
+      <p style={{ fontWeight: 600, color: COR_TEXTO_PRINCIPAL, margin: '0 0 4px', fontSize: 12 }}>{label}</p>
+      <p style={{ fontSize: 12, color: COR_TEXTO_SECUNDARIO, margin: 0 }}>Total: <strong style={{ color: payload[0]?.fill }}>{payload[0]?.value}</strong></p>
     </div>
   )
 }
 
-// ─── CARD STAT ────────────────────────────────────────────────────────────────
 function CardStat({ label, valor, cor, sub, icone }: { label: string; valor: number; cor: string; sub?: string; icone?: string }) {
   return (
     <div style={{ backgroundColor: COR_CARD, borderRadius: 16, padding: '20px 24px', border: `1px solid ${COR_BORDA}`, display: 'flex', flexDirection: 'column', justifyContent: 'center', boxShadow: '0 1px 2px rgba(0,0,0,0.05)', transition: 'transform 0.2s, box-shadow 0.2s', cursor: 'default' }}
@@ -176,7 +241,6 @@ function CardStat({ label, valor, cor, sub, icone }: { label: string; valor: num
   )
 }
 
-// ─── SEÇÃO HEADER ─────────────────────────────────────────────────────────────
 function SecaoHeader({ titulo }: { titulo: string }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 12, margin: '24px 0 16px' }}>
@@ -186,138 +250,92 @@ function SecaoHeader({ titulo }: { titulo: string }) {
   )
 }
 
-// ─── TOGGLE SITUAÇÃO NR/PO ────────────────────────────────────────────────────
 function ToggleSituacaoNR({ valor, onChange }: { valor: SituacaoNR; onChange: (v: SituacaoNR) => void }) {
   const ops: { key: SituacaoNR; label: string; cor: string }[] = [
-    { key: 'proximo',   label: 'Próximos do Vencimento', cor: CORES_STATUS.laranja },
-    { key: 'vencido',   label: 'Vencidos',               cor: CORES_STATUS.vermelho },
-    { key: 'programado',label: 'Programados',             cor: CORES_STATUS.roxo },
+    { key: 'proximo', label: 'Próximos do Vencimento', cor: CORES_STATUS.laranja },
+    { key: 'vencido', label: 'Vencidos', cor: CORES_STATUS.vermelho },
+    { key: 'programado', label: 'Programados', cor: CORES_STATUS.roxo },
   ]
   return (
     <div style={{ display: 'inline-flex', backgroundColor: '#f4f4f5', borderRadius: 12, padding: 4, border: `1px solid ${COR_BORDA}`, gap: 2 }}>
       {ops.map(op => (
-        <button key={op.key} onClick={() => onChange(op.key)} style={{
-          padding: '8px 16px', fontSize: 13, fontWeight: valor === op.key ? 600 : 500,
-          border: 'none', borderRadius: 8, cursor: 'pointer',
-          backgroundColor: valor === op.key ? '#fff' : 'transparent',
-          color: valor === op.key ? op.cor : COR_TEXTO_SECUNDARIO,
-          boxShadow: valor === op.key ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
-          transition: 'all 0.2s',
-        }}>{op.label}</button>
+        <button key={op.key} onClick={() => onChange(op.key)} style={{ padding: '8px 16px', fontSize: 13, fontWeight: valor === op.key ? 600 : 500, border: 'none', borderRadius: 8, cursor: 'pointer', backgroundColor: valor === op.key ? '#fff' : 'transparent', color: valor === op.key ? op.cor : COR_TEXTO_SECUNDARIO, boxShadow: valor === op.key ? '0 1px 3px rgba(0,0,0,0.1)' : 'none', transition: 'all 0.2s' }}>{op.label}</button>
       ))}
     </div>
   )
 }
 
-// ─── TOGGLE SITUAÇÃO MEDICINA ─────────────────────────────────────────────────
 function ToggleSituacaoMed({ valor, onChange }: { valor: SituacaoMed; onChange: (v: SituacaoMed) => void }) {
   const ops: { key: SituacaoMed; label: string; cor: string }[] = [
-    { key: 'critico', label: 'Prazo Crítico',        cor: CORES_STATUS.laranja },
+    { key: 'critico', label: 'Prazo Crítico', cor: CORES_STATUS.laranja },
     { key: 'atencao', label: 'Bernhoeft c/ Atenção', cor: CORES_STATUS.amarelo },
-    { key: 'vencido', label: 'Vencidos',              cor: CORES_STATUS.vermelho },
+    { key: 'vencido', label: 'Vencidos', cor: CORES_STATUS.vermelho },
   ]
   return (
     <div style={{ display: 'inline-flex', backgroundColor: '#f4f4f5', borderRadius: 12, padding: 4, border: `1px solid ${COR_BORDA}`, gap: 2 }}>
       {ops.map(op => (
-        <button key={op.key} onClick={() => onChange(op.key)} style={{
-          padding: '8px 16px', fontSize: 13, fontWeight: valor === op.key ? 600 : 500,
-          border: 'none', borderRadius: 8, cursor: 'pointer',
-          backgroundColor: valor === op.key ? '#fff' : 'transparent',
-          color: valor === op.key ? op.cor : COR_TEXTO_SECUNDARIO,
-          boxShadow: valor === op.key ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
-          transition: 'all 0.2s',
-        }}>{op.label}</button>
+        <button key={op.key} onClick={() => onChange(op.key)} style={{ padding: '8px 16px', fontSize: 13, fontWeight: valor === op.key ? 600 : 500, border: 'none', borderRadius: 8, cursor: 'pointer', backgroundColor: valor === op.key ? '#fff' : 'transparent', color: valor === op.key ? op.cor : COR_TEXTO_SECUNDARIO, boxShadow: valor === op.key ? '0 1px 3px rgba(0,0,0,0.1)' : 'none', transition: 'all 0.2s' }}>{op.label}</button>
       ))}
     </div>
   )
 }
 
-// ─── HELPERS DE CONTAGEM NR ───────────────────────────────────────────────────
-function contarNRPorGrupo(
-  colabs: ColabNR[], nrs: { id: number; nome: string; validade_dias: number | null }[],
-  matriz: MatrizNR[], agrup: 'base' | 'gerencia' | 'supervisor', situacao: SituacaoNR
-): { nome: string; total: number }[] {
-  const grupos: Record<string, number> = {}
-  colabs.forEach(c => {
-    const chave = agrup === 'base' ? c.base : agrup === 'gerencia' ? c.gerencia : c.supervisor
-    if (!chave) return
-    nrs.forEach(nr => {
-      if (getObrigatoriedade(matriz, c.funcao, c.processo, nr.nome) !== 'SIM') return
-      const reg = c.registros[nr.id]
-      if (nr.validade_dias === null) return
-      if (situacao === 'programado') {
-        if (!reg) return
-        const s = getStatus(reg.data_vencimento!)
-        if (!((s === 'proximo' || s === 'vencido') && reg.programacoes.some(d => d >= hoje))) return
-      } else if (situacao === 'proximo') {
-        if (!reg) return
-        if (getStatus(reg.data_vencimento!) !== 'proximo') return
-      } else {
-        if (reg && getStatus(reg.data_vencimento!) !== 'vencido') return
-        if (!reg) { /* sem registro = vencido */ } else if (getStatus(reg.data_vencimento!) !== 'vencido') return
-      }
-      grupos[chave] = (grupos[chave] || 0) + 1
-    })
-  })
-  return Object.entries(grupos).map(([nome, total]) => ({ nome, total })).sort((a, b) => b.total - a.total)
+function BadgeFiltro({ filtro, onLimpar }: { filtro: FiltroAtivo; onLimpar: () => void }) {
+  if (!filtro) return null
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 12px', backgroundColor: '#fdf2f5', border: `1px solid ${COR_PRIMARIA}`, borderRadius: 20, width: 'fit-content' }}>
+      <span style={{ fontSize: 12, color: COR_PRIMARIA, fontWeight: 600 }}>Filtro: {filtro.valor}</span>
+      <button onClick={onLimpar} style={{ fontSize: 13, color: COR_PRIMARIA, background: 'none', border: 'none', cursor: 'pointer', padding: 0, lineHeight: 1 }}>✕</button>
+    </div>
+  )
 }
 
-function contarMedPorGrupo(
-  colabs: ColabMed[], agrup: 'base' | 'gerencia' | 'supervisor', situacao: SituacaoMed
-): { nome: string; total: number }[] {
-  const grupos: Record<string, number> = {}
-  colabs.forEach(c => {
-    const st = getStatusMed(c.asoVencimento)
-    if (st === 'sem_aso' || st === 'no_prazo') return
-    if (st !== situacao) return
-    const chave = agrup === 'base' ? c.base : agrup === 'gerencia' ? c.gerencia : c.supervisor
-    if (!chave) return
-    grupos[chave] = (grupos[chave] || 0) + 1
-  })
-  return Object.entries(grupos).map(([nome, total]) => ({ nome, total })).sort((a, b) => b.total - a.total)
-}
-
-// ─── COR POR SITUAÇÃO ─────────────────────────────────────────────────────────
-function corSituacaoNR(s: SituacaoNR): string {
-  if (s === 'proximo') return CORES_STATUS.laranja
-  if (s === 'vencido') return CORES_STATUS.vermelho
-  return CORES_STATUS.roxo
-}
-function corSituacaoMed(s: SituacaoMed): string {
-  if (s === 'critico') return CORES_STATUS.laranja
-  if (s === 'atencao') return CORES_STATUS.amarelo
-  return CORES_STATUS.vermelho
-}
-
-// ─── GRÁFICO BARRAS HORIZONTAIS ───────────────────────────────────────────────
-function GraficoHorizontal({ dados, cor, titulo, vazio }: { dados: { nome: string; total: number }[]; cor: string; titulo: string; vazio: string }) {
+function GraficoHorizontal({ dados, cor, titulo, vazio, tipoAgrup, filtroAtivo, onFiltro }: {
+  dados: { nome: string; total: number }[]; cor: string; titulo: string; vazio: string
+  tipoAgrup: 'base' | 'gerencia' | 'supervisor'; filtroAtivo: FiltroAtivo; onFiltro: (f: FiltroAtivo) => void
+}) {
   if (!dados.length) return (
-    <div style={{ backgroundColor: COR_CARD, borderRadius: 16, padding: '24px', border: `1px solid ${COR_BORDA}`, display: 'flex', flexDirection: 'column', gap: 12 }}>
-      <p style={{ fontSize: 14, fontWeight: 700, color: COR_TEXTO_PRINCIPAL, margin: 0 }}>{titulo}</p>
-      <div style={{ height: 180, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+    <div style={{ backgroundColor: COR_CARD, borderRadius: 16, padding: '24px', border: `1px solid ${COR_BORDA}` }}>
+      <p style={{ fontSize: 14, fontWeight: 700, color: COR_TEXTO_PRINCIPAL, margin: '0 0 12px' }}>{titulo}</p>
+      <div style={{ height: 160, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
         <p style={{ fontSize: 13, color: '#ccc' }}>{vazio}</p>
       </div>
     </div>
   )
-  const altura = Math.max(180, dados.length * 36 + 40)
+  const altura = Math.max(160, dados.length * 36 + 40)
   return (
     <div style={{ backgroundColor: COR_CARD, borderRadius: 16, padding: '24px', border: `1px solid ${COR_BORDA}` }}>
-      <p style={{ fontSize: 14, fontWeight: 700, color: COR_TEXTO_PRINCIPAL, margin: '0 0 16px' }}>{titulo}</p>
+      <p style={{ fontSize: 14, fontWeight: 700, color: COR_TEXTO_PRINCIPAL, margin: '0 0 4px' }}>{titulo}</p>
+      <p style={{ fontSize: 11, color: COR_TEXTO_SECUNDARIO, margin: '0 0 16px' }}>Clique para filtrar</p>
       <ResponsiveContainer width="100%" height={altura}>
         <BarChart data={dados} layout="vertical" margin={{ top: 0, right: 40, left: 10, bottom: 0 }}>
           <CartesianGrid strokeDasharray="3 3" stroke={COR_BORDA} horizontal={false} />
           <XAxis type="number" tick={{ fontSize: 11, fill: COR_TEXTO_SECUNDARIO }} axisLine={false} tickLine={false} />
           <YAxis type="category" dataKey="nome" tick={{ fontSize: 12, fill: COR_TEXTO_PRINCIPAL, fontWeight: 500 }} axisLine={false} tickLine={false} width={70} />
           <Tooltip content={<CustomTooltip />} cursor={{ fill: '#f4f4f5' }} />
-          <Bar dataKey="total" fill={cor} radius={[0, 6, 6, 0]} barSize={22} label={{ position: 'right', fontSize: 12, fill: COR_TEXTO_SECUNDARIO, fontWeight: 600 }} />
+          <Bar dataKey="total" radius={[0, 6, 6, 0]} barSize={22}
+            label={{ position: 'right', fontSize: 12, fill: COR_TEXTO_SECUNDARIO, fontWeight: 600 }}
+            onClick={(data: any) => {
+              const ativo = filtroAtivo?.tipo === tipoAgrup && filtroAtivo?.valor === data.nome
+              onFiltro(ativo ? null : { tipo: tipoAgrup, valor: data.nome })
+            }}
+            style={{ cursor: 'pointer' }}>
+            {dados.map((entry) => {
+              const selecionado = filtroAtivo?.tipo === tipoAgrup && filtroAtivo?.valor === entry.nome
+              const desbotado = filtroAtivo?.tipo === tipoAgrup && filtroAtivo?.valor !== entry.nome
+              return <Cell key={entry.nome} fill={desbotado ? '#d1d5db' : cor} opacity={selecionado ? 1 : desbotado ? 0.5 : 1} />
+            })}
+          </Bar>
         </BarChart>
       </ResponsiveContainer>
     </div>
   )
 }
 
-// ─── GRÁFICO BARRAS VERTICAIS (SUPERVISOR) ────────────────────────────────────
-function GraficoVertical({ dados, cor, titulo, vazio }: { dados: { nome: string; total: number }[]; cor: string; titulo: string; vazio: string }) {
+function GraficoVertical({ dados, cor, titulo, vazio, tipoAgrup, filtroAtivo, onFiltro }: {
+  dados: { nome: string; total: number }[]; cor: string; titulo: string; vazio: string
+  tipoAgrup: 'base' | 'gerencia' | 'supervisor'; filtroAtivo: FiltroAtivo; onFiltro: (f: FiltroAtivo) => void
+}) {
   const top10 = [...dados].sort((a, b) => b.total - a.total).slice(0, 10)
   if (!top10.length) return (
     <div style={{ backgroundColor: COR_CARD, borderRadius: 16, padding: '24px', border: `1px solid ${COR_BORDA}` }}>
@@ -329,75 +347,55 @@ function GraficoVertical({ dados, cor, titulo, vazio }: { dados: { nome: string;
   )
   return (
     <div style={{ backgroundColor: COR_CARD, borderRadius: 16, padding: '24px', border: `1px solid ${COR_BORDA}` }}>
-      <p style={{ fontSize: 14, fontWeight: 700, color: COR_TEXTO_PRINCIPAL, margin: '0 0 16px' }}>{titulo} <span style={{ fontSize: 11, color: COR_TEXTO_SECUNDARIO, fontWeight: 400 }}>Top 10</span></p>
+      <p style={{ fontSize: 14, fontWeight: 700, color: COR_TEXTO_PRINCIPAL, margin: '0 0 4px' }}>{titulo} <span style={{ fontSize: 11, color: COR_TEXTO_SECUNDARIO, fontWeight: 400 }}>Top 10</span></p>
+      <p style={{ fontSize: 11, color: COR_TEXTO_SECUNDARIO, margin: '0 0 16px' }}>Clique para filtrar</p>
       <ResponsiveContainer width="100%" height={280}>
         <BarChart data={top10} margin={{ top: 10, right: 10, left: -20, bottom: 60 }}>
           <CartesianGrid strokeDasharray="3 3" stroke={COR_BORDA} vertical={false} />
           <XAxis dataKey="nome" tick={{ fontSize: 11, fill: COR_TEXTO_SECUNDARIO }} axisLine={{ stroke: COR_BORDA }} tickLine={false} angle={-35} textAnchor="end" interval={0} dy={10} />
           <YAxis tick={{ fontSize: 11, fill: COR_TEXTO_SECUNDARIO }} axisLine={false} tickLine={false} dx={-10} />
           <Tooltip content={<CustomTooltip />} cursor={{ fill: '#f4f4f5' }} />
-         <Bar dataKey="total" fill={cor} radius={[6, 6, 0, 0]} barSize={32}
-          label={{ position: 'top', fontSize: 12, fill: COR_TEXTO_SECUNDARIO, fontWeight: 600 }} />
+          <Bar dataKey="total" radius={[6, 6, 0, 0]} barSize={32}
+            label={{ position: 'top', fontSize: 12, fill: COR_TEXTO_SECUNDARIO, fontWeight: 600 }}
+            onClick={(data: any) => {
+              const ativo = filtroAtivo?.tipo === tipoAgrup && filtroAtivo?.valor === data.nome
+              onFiltro(ativo ? null : { tipo: tipoAgrup, valor: data.nome })
+            }}
+            style={{ cursor: 'pointer' }}>
+            {top10.map((entry) => {
+              const selecionado = filtroAtivo?.tipo === tipoAgrup && filtroAtivo?.valor === entry.nome
+              const desbotado = filtroAtivo?.tipo === tipoAgrup && filtroAtivo?.valor !== entry.nome
+              return <Cell key={entry.nome} fill={desbotado ? '#d1d5db' : cor} opacity={selecionado ? 1 : desbotado ? 0.5 : 1} />
+            })}
+          </Bar>
         </BarChart>
       </ResponsiveContainer>
     </div>
   )
 }
 
-function contarPOPorGrupo(
-  colabs: ColabPO[], pos: { id: number; nome: string }[],
-  agrup: 'base' | 'gerencia' | 'supervisor', situacao: SituacaoNR
-): { nome: string; total: number }[] {
-  const grupos: Record<string, number> = {}
-  colabs.forEach(c => {
-    pos.forEach(po => {
-      const campo = po.nome === 'Direção Defensiva' ? c.direcao : c.pilotagem
-      if (campo !== 'SIM') return
-      const reg = c.registros[po.id]
-      if (situacao === 'programado') {
-        if (!reg) return
-        const s = getStatus(reg.data_vencimento!)
-        if (!((s === 'proximo' || s === 'vencido') && reg.programacoes.some(d => d >= hoje))) return
-      } else if (situacao === 'proximo') {
-        if (!reg || getStatus(reg.data_vencimento!) !== 'proximo') return
-      } else {
-        if (reg && getStatus(reg.data_vencimento!) !== 'vencido') return
-      }
-      const chave = agrup === 'base' ? c.base : agrup === 'gerencia' ? c.gerencia : c.supervisor
-      if (!chave) return
-      grupos[chave] = (grupos[chave] || 0) + 1
-    })
-  })
-  return Object.entries(grupos).map(([nome, total]) => ({ nome, total })).sort((a, b) => b.total - a.total)
-}
-
-// ─── SEÇÃO DE GRÁFICOS NR/PO ──────────────────────────────────────────────────
-function SecaoGraficosNR({ colabs, nrs, matriz, situacao }: {
-  colabs: ColabNR[]
-  nrs: { id: number; nome: string; validade_dias: number | null }[]
-  matriz: MatrizNR[]
-  situacao: SituacaoNR
+function SecaoGraficosNR({ colabs, nrs, matriz, situacao, filtroAtivo, onFiltro }: {
+  colabs: ColabNR[]; nrs: { id: number; nome: string; validade_dias: number | null }[]
+  matriz: MatrizNR[]; situacao: SituacaoNR; filtroAtivo: FiltroAtivo; onFiltro: (f: FiltroAtivo) => void
 }) {
   const cor = corSituacaoNR(situacao)
   const dadosBase = useMemo(() => contarNRPorGrupo(colabs, nrs, matriz, 'base', situacao), [colabs, nrs, matriz, situacao])
   const dadosGer  = useMemo(() => contarNRPorGrupo(colabs, nrs, matriz, 'gerencia', situacao), [colabs, nrs, matriz, situacao])
   const dadosSup  = useMemo(() => contarNRPorGrupo(colabs, nrs, matriz, 'supervisor', situacao), [colabs, nrs, matriz, situacao])
-
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-        <GraficoHorizontal dados={dadosBase} cor={cor} titulo="Por Base"     vazio="Sem dados por base" />
-        <GraficoHorizontal dados={dadosGer}  cor={cor} titulo="Por Gerência" vazio="Sem dados de gerência" />
+        <GraficoHorizontal dados={dadosBase} cor={cor} titulo="Por Base"     vazio="Sem dados por base"     tipoAgrup="base"     filtroAtivo={filtroAtivo} onFiltro={onFiltro} />
+        <GraficoHorizontal dados={dadosGer}  cor={cor} titulo="Por Gerência" vazio="Sem dados de gerência"  tipoAgrup="gerencia" filtroAtivo={filtroAtivo} onFiltro={onFiltro} />
       </div>
-      <GraficoVertical dados={dadosSup} cor={cor} titulo="Por Supervisor" vazio="Sem dados de supervisor" />
+      <GraficoVertical dados={dadosSup} cor={cor} titulo="Por Supervisor" vazio="Sem dados de supervisor" tipoAgrup="supervisor" filtroAtivo={filtroAtivo} onFiltro={onFiltro} />
     </div>
   )
 }
 
-function SecaoGraficosPO({ colabs, pos, situacao }: {
-  colabs: ColabPO[]
-  pos: { id: number; nome: string; validade_dias: number }[]
-  situacao: SituacaoNR
+function SecaoGraficosPO({ colabs, pos, situacao, filtroAtivo, onFiltro }: {
+  colabs: ColabPO[]; pos: { id: number; nome: string; validade_dias: number }[]
+  situacao: SituacaoNR; filtroAtivo: FiltroAtivo; onFiltro: (f: FiltroAtivo) => void
 }) {
   const cor = corSituacaoNR(situacao)
   const dadosBase = useMemo(() => contarPOPorGrupo(colabs, pos, 'base', situacao), [colabs, pos, situacao])
@@ -406,47 +404,43 @@ function SecaoGraficosPO({ colabs, pos, situacao }: {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-        <GraficoHorizontal dados={dadosBase} cor={cor} titulo="Por Base"     vazio="Sem dados por base" />
-        <GraficoHorizontal dados={dadosGer}  cor={cor} titulo="Por Gerência" vazio="Sem dados de gerência" />
+        <GraficoHorizontal dados={dadosBase} cor={cor} titulo="Por Base"     vazio="Sem dados por base"     tipoAgrup="base"     filtroAtivo={filtroAtivo} onFiltro={onFiltro} />
+        <GraficoHorizontal dados={dadosGer}  cor={cor} titulo="Por Gerência" vazio="Sem dados de gerência"  tipoAgrup="gerencia" filtroAtivo={filtroAtivo} onFiltro={onFiltro} />
       </div>
-      <GraficoVertical dados={dadosSup} cor={cor} titulo="Por Supervisor" vazio="Sem dados de supervisor" />
+      <GraficoVertical dados={dadosSup} cor={cor} titulo="Por Supervisor" vazio="Sem dados de supervisor" tipoAgrup="supervisor" filtroAtivo={filtroAtivo} onFiltro={onFiltro} />
     </div>
   )
 }
 
-// ─── SEÇÃO DE GRÁFICOS MEDICINA ───────────────────────────────────────────────
-function SecaoGraficosMed({ colabs, situacao }: { colabs: ColabMed[]; situacao: SituacaoMed }) {
+function SecaoGraficosMed({ colabs, situacao, filtroAtivo, onFiltro }: {
+  colabs: ColabMed[]; situacao: SituacaoMed; filtroAtivo: FiltroAtivo; onFiltro: (f: FiltroAtivo) => void
+}) {
   const cor = corSituacaoMed(situacao)
   const dadosBase = useMemo(() => contarMedPorGrupo(colabs, 'base', situacao), [colabs, situacao])
   const dadosGer  = useMemo(() => contarMedPorGrupo(colabs, 'gerencia', situacao), [colabs, situacao])
   const dadosSup  = useMemo(() => contarMedPorGrupo(colabs, 'supervisor', situacao), [colabs, situacao])
-
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-        <GraficoHorizontal dados={dadosBase} cor={cor} titulo="Por Base"     vazio="Sem dados por base" />
-        <GraficoHorizontal dados={dadosGer}  cor={cor} titulo="Por Gerência" vazio="Sem dados de gerência" />
+        <GraficoHorizontal dados={dadosBase} cor={cor} titulo="Por Base"     vazio="Sem dados por base"     tipoAgrup="base"     filtroAtivo={filtroAtivo} onFiltro={onFiltro} />
+        <GraficoHorizontal dados={dadosGer}  cor={cor} titulo="Por Gerência" vazio="Sem dados de gerência"  tipoAgrup="gerencia" filtroAtivo={filtroAtivo} onFiltro={onFiltro} />
       </div>
-      <GraficoVertical dados={dadosSup} cor={cor} titulo="Por Supervisor" vazio="Sem dados de supervisor" />
+      <GraficoVertical dados={dadosSup} cor={cor} titulo="Por Supervisor" vazio="Sem dados de supervisor" tipoAgrup="supervisor" filtroAtivo={filtroAtivo} onFiltro={onFiltro} />
     </div>
   )
 }
 
-// ─── PÁGINA PRINCIPAL ─────────────────────────────────────────────────────────
 export default function DashboardPage() {
   const router = useRouter()
   const [abaModulo, setAbaModulo] = useState<AbaModulo>('geral')
   const [situacaoNR,  setSituacaoNR]  = useState<SituacaoNR>('proximo')
   const [situacaoPO,  setSituacaoPO]  = useState<SituacaoNR>('proximo')
   const [situacaoMed, setSituacaoMed] = useState<SituacaoMed>('atencao')
+  const [filtroNR,  setFiltroNR]  = useState<FiltroAtivo>(null)
+  const [filtroPO,  setFiltroPO]  = useState<FiltroAtivo>(null)
+  const [filtroMed, setFiltroMed] = useState<FiltroAtivo>(null)
   const [loading, setLoading] = useState(true)
-
-  const [statsGeral, setStatsGeral] = useState<StatsGeral>({
-    totalAtivos: 0,
-    nrValidos: 0, nrProximos: 0, nrVencidos: 0, nrProgramados: 0,
-    poValidos: 0, poProximos: 0, poVencidos: 0, poProgramados: 0,
-    medNoPrazo: 0, medCritico: 0, medAtencao: 0, medVencido: 0, medProgramados: 0,
-  })
+  const [statsGeral, setStatsGeral] = useState<StatsGeral>({ totalAtivos: 0, nrValidos: 0, nrProximos: 0, nrVencidos: 0, nrProgramados: 0, poValidos: 0, poProximos: 0, poVencidos: 0, poProgramados: 0, medNoPrazo: 0, medCritico: 0, medAtencao: 0, medVencido: 0, medProgramados: 0 })
   const [colabsNR,  setColabsNR]  = useState<ColabNR[]>([])
   const [colabsPO,  setColabsPO]  = useState<ColabPO[]>([])
   const [colabsMed, setColabsMed] = useState<ColabMed[]>([])
@@ -454,23 +448,37 @@ export default function DashboardPage() {
   const [posData,   setPosData]   = useState<{ id: number; nome: string; validade_dias: number }[]>([])
   const [matrizNR,  setMatrizNR]  = useState<MatrizNR[]>([])
 
+  const aplicarFiltro = (colabs: any[], filtro: FiltroAtivo) => {
+    if (!filtro) return colabs
+    return colabs.filter((c: any) => {
+      if (filtro.tipo === 'base') return c.base === filtro.valor
+      if (filtro.tipo === 'gerencia') return c.gerencia === filtro.valor
+      return c.supervisor === filtro.valor
+    })
+  }
+
+  const colabsNRFiltrados = useMemo(() => aplicarFiltro(colabsNR, filtroNR) as ColabNR[], [colabsNR, filtroNR])
+  const colabsPOFiltrados  = useMemo(() => aplicarFiltro(colabsPO, filtroPO) as ColabPO[],  [colabsPO, filtroPO])
+  const colabsMedFiltrados = useMemo(() => aplicarFiltro(colabsMed, filtroMed) as ColabMed[], [colabsMed, filtroMed])
+
+  const statsNR  = useMemo(() => calcStatsNR(colabsNRFiltrados, nrsData, matrizNR), [colabsNRFiltrados, nrsData, matrizNR])
+  const statsPO  = useMemo(() => calcStatsPO(colabsPOFiltrados, posData), [colabsPOFiltrados, posData])
+  const statsMed = useMemo(() => calcStatsMed(colabsMedFiltrados), [colabsMedFiltrados])
+
   useEffect(() => {
     async function carregar() {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) { router.push('/login'); return }
 
-      // ── 1. Regras ──
       const { data: regras } = await supabase.from('regras_vencimento').select('id, nome_item, validade_dias')
       const nrs = (regras || []).filter(r => NRS_ALVO.includes(r.nome_item)).map(r => ({ id: r.id, nome: r.nome_item, validade_dias: r.validade_dias }))
       const pos = (regras || []).filter(r => POS_ALVO.includes(r.nome_item)).map(r => ({ id: r.id, nome: r.nome_item, validade_dias: r.validade_dias || 730 }))
       setNrsData(nrs); setPosData(pos)
 
-      // ── 2. Matriz NR ──
       const { data: matrizData } = await supabase.from('matriz_treinamentos').select('funcao, processo, treinamento, obrigatorio').eq('pagina', 'BASE NR')
       const mNR: MatrizNR[] = matrizData || []
       setMatrizNR(mNR)
 
-      // ── 3. Colaboradores — busca todos e filtra no JS ──
       let todosColabs: any[] = []; let from = 0
       while (true) {
         const { data: cd } = await supabase.from('colaboradores')
@@ -483,115 +491,68 @@ export default function DashboardPage() {
       }
       todosColabs = todosColabs.filter((c: any) => !SITUACOES_EXCLUIDAS.includes(c.situacao))
 
-      const colabInfo: Record<string, { funcao: string | null; processo: string | null; base: string | null; gerencia: string | null; supervisor: string | null }> = {}
+      const colabInfo: Record<string, any> = {}
       todosColabs.forEach((c: any) => {
         colabInfo[c.matricula] = {
           funcao: c.funcoes?.nome || null,
           processo: c.processo || null,
           base: c.bases?.nome || null,
-          gerencia: c.gerencia || null,  // campo texto direto
+          gerencia: c.gerencia || null,
           supervisor: c.supervisor ? c.supervisor.trim().split(' ')[0] : null,
         }
       })
       const mats = todosColabs.map((c: any) => c.matricula)
 
-      // ── 4. Colaboradores válidos para NR ──
       const matsNR = mats.filter((mat: string) => {
         const c = colabInfo[mat]
         if (!c?.funcao) return false
         return mNR.some(m => {
-          const mF = m.funcao.trim().toUpperCase()
-          const fC = c.funcao!.trim().toUpperCase()
+          const mF = m.funcao.trim().toUpperCase(); const fC = c.funcao.trim().toUpperCase()
           if (m.processo && m.processo.trim() !== '') return mF === fC && m.processo.trim().toUpperCase() === (c.processo || '').trim().toUpperCase()
           return mF === fC
         })
       })
 
-      // ── 5. Registros NR em lotes ──
-      const regsNRMap: Record<string, Record<number, { data_vencimento: string | null; programacoes: string[] }>> = {}
-      if (matsNR.length > 0 && nrs.length > 0) await buscarRegistrosEmLotes(matsNR, nrs.map(n => n.id), regsNRMap)
-
+      const regsNRMap: Record<string, Record<number, any>> = {}
+      if (matsNR.length > 0) await buscarRegistrosEmLotes(matsNR, nrs.map(n => n.id), regsNRMap)
       const cNR: ColabNR[] = matsNR.map((mat: string) => ({ matricula: mat, ...colabInfo[mat], registros: regsNRMap[mat] || {} }))
       setColabsNR(cNR)
 
-      // ── 6. Matriz PO ──
-      const matrizPOMap: Record<string, { direcao: string; pilotagem: string }> = {}
+      const matrizPOMap: Record<string, any> = {}
       for (let i = 0; i < mats.length; i += LOTE) {
-        const lote = mats.slice(i, i + LOTE)
-        const { data: mpd } = await supabase.from('matriz_po').select('matricula, direcao_defensiva, pilotagem_defensiva').in('matricula', lote)
-        ;(mpd || []).forEach((m: any) => {
-          matrizPOMap[m.matricula] = {
-            direcao: (m.direcao_defensiva || 'N/A').trim().toUpperCase(),
-            pilotagem: (m.pilotagem_defensiva || 'N/A').trim().toUpperCase(),
-          }
-        })
+        const { data: mpd } = await supabase.from('matriz_po').select('matricula, direcao_defensiva, pilotagem_defensiva').in('matricula', mats.slice(i, i + LOTE))
+        ;(mpd || []).forEach((m: any) => { matrizPOMap[m.matricula] = { direcao: (m.direcao_defensiva || 'N/A').trim().toUpperCase(), pilotagem: (m.pilotagem_defensiva || 'N/A').trim().toUpperCase() } })
       }
-
-      // ── 7. Registros PO em lotes ──
-      const regsPOMap: Record<string, Record<number, { data_vencimento: string | null; programacoes: string[] }>> = {}
-      if (mats.length > 0 && pos.length > 0) await buscarRegistrosEmLotes(mats, pos.map(p => p.id), regsPOMap)
-
-      const cPO: ColabPO[] = mats
-        .map((mat: string) => {
-          const mpo = matrizPOMap[mat] || { direcao: 'N/A', pilotagem: 'N/A' }
-          return { matricula: mat, ...colabInfo[mat], direcao: mpo.direcao, pilotagem: mpo.pilotagem, registros: regsPOMap[mat] || {} }
-        })
-        .filter((c: ColabPO) => c.direcao === 'SIM' || c.pilotagem === 'SIM')
+      const regsPOMap: Record<string, Record<number, any>> = {}
+      if (mats.length > 0) await buscarRegistrosEmLotes(mats, pos.map(p => p.id), regsPOMap)
+      const cPO: ColabPO[] = mats.map((mat: string) => {
+        const mpo = matrizPOMap[mat] || { direcao: 'N/A', pilotagem: 'N/A' }
+        return { matricula: mat, ...colabInfo[mat], direcao: mpo.direcao, pilotagem: mpo.pilotagem, registros: regsPOMap[mat] || {} }
+      }).filter((c: ColabPO) => c.direcao === 'SIM' || c.pilotagem === 'SIM')
       setColabsPO(cPO)
 
-      // ── 8. ASOs em lotes ──
-      const asosPorColab: Record<string, { data_vencimento: string | null; data_realizacao: string; programacoes: string[] }> = {}
+      const asosPorColab: Record<string, any> = {}
       for (let i = 0; i < mats.length; i += LOTE) {
         const lote = mats.slice(i, i + LOTE); from = 0
         while (true) {
-          const { data: ad } = await supabase.from('asos')
-            .select('matricula_colaborador, data_vencimento, data_realizacao, programacoes_exames(data_programada)')
-            .eq('tipo', 'periodico').in('matricula_colaborador', lote).range(from, from + 499)
+          const { data: ad } = await supabase.from('asos').select('matricula_colaborador, data_vencimento, data_realizacao, programacoes_exames(data_programada)').eq('tipo', 'periodico').in('matricula_colaborador', lote).range(from, from + 499)
           if (!ad || ad.length === 0) break
           ad.forEach((a: any) => {
             const atual = asosPorColab[a.matricula_colaborador]
             if (!atual || new Date(a.data_realizacao) > new Date(atual.data_realizacao)) {
-              asosPorColab[a.matricula_colaborador] = {
-                data_vencimento: a.data_vencimento, data_realizacao: a.data_realizacao,
-                programacoes: (a.programacoes_exames || []).map((p: any) => p.data_programada),
-              }
+              asosPorColab[a.matricula_colaborador] = { data_vencimento: a.data_vencimento, data_realizacao: a.data_realizacao, programacoes: (a.programacoes_exames || []).map((p: any) => p.data_programada) }
             }
           })
           if (ad.length < 500) break; from += 500
         }
       }
-
-      const cMed: ColabMed[] = mats.map((mat: string) => ({
-        matricula: mat, ...colabInfo[mat],
-        asoVencimento: asosPorColab[mat]?.data_vencimento || null,
-        asoProgramacoes: asosPorColab[mat]?.programacoes || [],
-      }))
+      const cMed: ColabMed[] = mats.map((mat: string) => ({ matricula: mat, ...colabInfo[mat], asoVencimento: asosPorColab[mat]?.data_vencimento || null, asoProgramacoes: asosPorColab[mat]?.programacoes || [] }))
       setColabsMed(cMed)
 
-      // ── 9. Stats ──
       const sNR = calcStatsNR(cNR, nrs, mNR)
-      const sPO = calcStatsPO(
-        mats.map((mat: string) => {
-          const mpo = matrizPOMap[mat] || { direcao: 'N/A', pilotagem: 'N/A' }
-          return { matricula: mat, ...colabInfo[mat], direcao: mpo.direcao, pilotagem: mpo.pilotagem, registros: regsPOMap[mat] || {} }
-        }), pos
-      )
-      let mNP = 0, mC = 0, mA = 0, mV = 0, mProg = 0
-      cMed.forEach(c => {
-        const st = getStatusMed(c.asoVencimento)
-        if (st === 'no_prazo') mNP++
-        else if (st === 'critico') mC++
-        else if (st === 'atencao') mA++
-        else if (st === 'vencido') mV++
-        if ((st === 'critico' || st === 'atencao' || st === 'vencido') && c.asoProgramacoes.some(d => d >= hoje)) mProg++
-      })
-
-      setStatsGeral({
-        totalAtivos: todosColabs.length,
-        nrValidos: sNR.validos, nrProximos: sNR.proximos, nrVencidos: sNR.vencidos, nrProgramados: sNR.programados,
-        poValidos: sPO.validos, poProximos: sPO.proximos, poVencidos: sPO.vencidos, poProgramados: sPO.programados,
-        medNoPrazo: mNP, medCritico: mC, medAtencao: mA, medVencido: mV, medProgramados: mProg,
-      })
+      const sPO = calcStatsPO(mats.map((mat: string) => { const mpo = matrizPOMap[mat] || { direcao: 'N/A', pilotagem: 'N/A' }; return { matricula: mat, ...colabInfo[mat], direcao: mpo.direcao, pilotagem: mpo.pilotagem, registros: regsPOMap[mat] || {} } }), pos)
+      const sM = calcStatsMed(cMed)
+      setStatsGeral({ totalAtivos: todosColabs.length, nrValidos: sNR.validos, nrProximos: sNR.proximos, nrVencidos: sNR.vencidos, nrProgramados: sNR.programados, poValidos: sPO.validos, poProximos: sPO.proximos, poVencidos: sPO.vencidos, poProgramados: sPO.programados, medNoPrazo: sM.mNP, medCritico: sM.mC, medAtencao: sM.mA, medVencido: sM.mV, medProgramados: sM.mProg })
       setLoading(false)
     }
     carregar()
@@ -613,7 +574,8 @@ export default function DashboardPage() {
 
       <div style={{ display: 'flex', gap: 24, borderBottom: `1px solid ${COR_BORDA}`, marginTop: 8 }}>
         {ABAS.map(a => (
-          <button key={a.key} onClick={() => setAbaModulo(a.key)} style={{ padding: '12px 4px', fontSize: 14, fontWeight: abaModulo === a.key ? 600 : 500, border: 'none', background: 'none', cursor: 'pointer', color: abaModulo === a.key ? COR_PRIMARIA : COR_TEXTO_SECUNDARIO, borderBottom: abaModulo === a.key ? `2px solid ${COR_PRIMARIA}` : '2px solid transparent', marginBottom: -1, transition: 'color 0.2s' }}>{a.label}</button>
+          <button key={a.key} onClick={() => { setAbaModulo(a.key as AbaModulo); setFiltroNR(null); setFiltroPO(null); setFiltroMed(null) }}
+            style={{ padding: '12px 4px', fontSize: 14, fontWeight: abaModulo === a.key ? 600 : 500, border: 'none', background: 'none', cursor: 'pointer', color: abaModulo === a.key ? COR_PRIMARIA : COR_TEXTO_SECUNDARIO, borderBottom: abaModulo === a.key ? `2px solid ${COR_PRIMARIA}` : '2px solid transparent', marginBottom: -1, transition: 'color 0.2s' }}>{a.label}</button>
         ))}
       </div>
 
@@ -624,11 +586,9 @@ export default function DashboardPage() {
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 32, paddingBottom: 40 }}>
 
-          {/* ── VISÃO GERAL ── */}
           {abaModulo === 'geral' && (
             <>
-              <div>
-                <SecaoHeader titulo="BASE NR" />
+              <div><SecaoHeader titulo="BASE NR" />
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 16 }}>
                   <CardStat label="Válidos"                valor={statsGeral.nrValidos}     cor={CORES_STATUS.verde}    icone="✓" />
                   <CardStat label="Próximos do Vencimento" valor={statsGeral.nrProximos}    cor={CORES_STATUS.laranja}  icone="⚠" />
@@ -636,8 +596,7 @@ export default function DashboardPage() {
                   <CardStat label="Programados"            valor={statsGeral.nrProgramados} cor={CORES_STATUS.roxo}     icone="ℹ" />
                 </div>
               </div>
-              <div>
-                <SecaoHeader titulo="BASE PO" />
+              <div><SecaoHeader titulo="BASE PO" />
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 16 }}>
                   <CardStat label="Válidos"                valor={statsGeral.poValidos}     cor={CORES_STATUS.verde}    icone="✓" />
                   <CardStat label="Próximos do Vencimento" valor={statsGeral.poProximos}    cor={CORES_STATUS.laranja}  icone="⚠" />
@@ -645,8 +604,7 @@ export default function DashboardPage() {
                   <CardStat label="Programados"            valor={statsGeral.poProgramados} cor={CORES_STATUS.roxo}     icone="ℹ" />
                 </div>
               </div>
-              <div>
-                <SecaoHeader titulo="Medicina do Trabalho" />
+              <div><SecaoHeader titulo="Medicina do Trabalho" />
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 16 }}>
                   <CardStat label="No Prazo"             valor={statsGeral.medNoPrazo}     cor={CORES_STATUS.verde}    icone="✓" />
                   <CardStat label="Prazo Crítico"        valor={statsGeral.medCritico}     cor={CORES_STATUS.laranja}  icone="⚠" />
@@ -658,52 +616,52 @@ export default function DashboardPage() {
             </>
           )}
 
-          {/* ── BASE NR ── */}
           {abaModulo === 'nr' && (
             <>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 16 }}>
-                <CardStat label="Válidos"                valor={statsGeral.nrValidos}     cor={CORES_STATUS.verde}    icone="✓" />
-                <CardStat label="Próximos do Vencimento" valor={statsGeral.nrProximos}    cor={CORES_STATUS.laranja}  icone="⚠" sub="≤ 30 dias" />
-                <CardStat label="Vencidos"               valor={statsGeral.nrVencidos}    cor={CORES_STATUS.vermelho} icone="✕" />
-                <CardStat label="Programados"            valor={statsGeral.nrProgramados} cor={CORES_STATUS.roxo}     icone="ℹ" />
+                <CardStat label="Válidos"                valor={statsNR.validos}     cor={CORES_STATUS.verde}    icone="✓" />
+                <CardStat label="Próximos do Vencimento" valor={statsNR.proximos}    cor={CORES_STATUS.laranja}  icone="⚠" sub="≤ 30 dias" />
+                <CardStat label="Vencidos"               valor={statsNR.vencidos}    cor={CORES_STATUS.vermelho} icone="✕" />
+                <CardStat label="Programados"            valor={statsNR.programados} cor={CORES_STATUS.roxo}     icone="ℹ" />
               </div>
-              <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                <ToggleSituacaoNR valor={situacaoNR} onChange={setSituacaoNR} />
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
+                <BadgeFiltro filtro={filtroNR} onLimpar={() => setFiltroNR(null)} />
+                <ToggleSituacaoNR valor={situacaoNR} onChange={v => { setSituacaoNR(v); setFiltroNR(null) }} />
               </div>
-              <SecaoGraficosNR colabs={colabsNR} nrs={nrsData} matriz={matrizNR} situacao={situacaoNR} />
+              <SecaoGraficosNR colabs={colabsNRFiltrados} nrs={nrsData} matriz={matrizNR} situacao={situacaoNR} filtroAtivo={filtroNR} onFiltro={setFiltroNR} />
             </>
           )}
 
-          {/* ── BASE PO ── */}
           {abaModulo === 'po' && (
             <>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 16 }}>
-                <CardStat label="Válidos"                valor={statsGeral.poValidos}     cor={CORES_STATUS.verde}    icone="✓" />
-                <CardStat label="Próximos do Vencimento" valor={statsGeral.poProximos}    cor={CORES_STATUS.laranja}  icone="⚠" sub="≤ 30 dias" />
-                <CardStat label="Vencidos"               valor={statsGeral.poVencidos}    cor={CORES_STATUS.vermelho} icone="✕" />
-                <CardStat label="Programados"            valor={statsGeral.poProgramados} cor={CORES_STATUS.roxo}     icone="ℹ" />
+                <CardStat label="Válidos"                valor={statsPO.validos}     cor={CORES_STATUS.verde}    icone="✓" />
+                <CardStat label="Próximos do Vencimento" valor={statsPO.proximos}    cor={CORES_STATUS.laranja}  icone="⚠" sub="≤ 30 dias" />
+                <CardStat label="Vencidos"               valor={statsPO.vencidos}    cor={CORES_STATUS.vermelho} icone="✕" />
+                <CardStat label="Programados"            valor={statsPO.programados} cor={CORES_STATUS.roxo}     icone="ℹ" />
               </div>
-              <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                <ToggleSituacaoNR valor={situacaoPO} onChange={setSituacaoPO} />
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
+                <BadgeFiltro filtro={filtroPO} onLimpar={() => setFiltroPO(null)} />
+                <ToggleSituacaoNR valor={situacaoPO} onChange={v => { setSituacaoPO(v); setFiltroPO(null) }} />
               </div>
-              <SecaoGraficosPO colabs={colabsPO} pos={posData} situacao={situacaoPO} />
+              <SecaoGraficosPO colabs={colabsPOFiltrados} pos={posData} situacao={situacaoPO} filtroAtivo={filtroPO} onFiltro={setFiltroPO} />
             </>
           )}
 
-          {/* ── MEDICINA ── */}
           {abaModulo === 'medicina' && (
             <>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 16 }}>
-                <CardStat label="No Prazo"             valor={statsGeral.medNoPrazo}     cor={CORES_STATUS.verde}    icone="✓" />
-                <CardStat label="Prazo Crítico"        valor={statsGeral.medCritico}     cor={CORES_STATUS.laranja}  icone="⚠" sub="≤ 60 dias" />
-                <CardStat label="Bernhoeft c/ Atenção" valor={statsGeral.medAtencao}     cor={CORES_STATUS.amarelo}  icone="⚠" sub="≤ 30 dias" />
-                <CardStat label="Vencidos"             valor={statsGeral.medVencido}     cor={CORES_STATUS.vermelho} icone="✕" />
-                <CardStat label="Programados"          valor={statsGeral.medProgramados} cor={CORES_STATUS.roxo}     icone="ℹ" />
+                <CardStat label="No Prazo"             valor={statsMed.mNP}   cor={CORES_STATUS.verde}    icone="✓" />
+                <CardStat label="Prazo Crítico"        valor={statsMed.mC}    cor={CORES_STATUS.laranja}  icone="⚠" sub="≤ 60 dias" />
+                <CardStat label="Bernhoeft c/ Atenção" valor={statsMed.mA}    cor={CORES_STATUS.amarelo}  icone="⚠" sub="≤ 30 dias" />
+                <CardStat label="Vencidos"             valor={statsMed.mV}    cor={CORES_STATUS.vermelho} icone="✕" />
+                <CardStat label="Programados"          valor={statsMed.mProg} cor={CORES_STATUS.roxo}     icone="ℹ" />
               </div>
-              <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                <ToggleSituacaoMed valor={situacaoMed} onChange={setSituacaoMed} />
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
+                <BadgeFiltro filtro={filtroMed} onLimpar={() => setFiltroMed(null)} />
+                <ToggleSituacaoMed valor={situacaoMed} onChange={v => { setSituacaoMed(v); setFiltroMed(null) }} />
               </div>
-              <SecaoGraficosMed colabs={colabsMed} situacao={situacaoMed} />
+              <SecaoGraficosMed colabs={colabsMedFiltrados} situacao={situacaoMed} filtroAtivo={filtroMed} onFiltro={setFiltroMed} />
             </>
           )}
         </div>
