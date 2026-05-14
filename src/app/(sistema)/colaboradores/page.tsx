@@ -18,8 +18,9 @@ interface Colaborador {
   data_demissao: string | null
   email_corporativo: string | null
   situacao: string
+  gerencia: string | null
+  supervisor: string | null
   bases: { nome: string } | null
-  gerencias: { sigla: string } | null
 }
 
 interface Base { id: number; nome: string }
@@ -32,11 +33,11 @@ interface Gerencia {
   colaboradores?: { nome: string } | null
 }
 
-type OrdemColuna = 'nome' | 'matricula' | 'funcao' | 'base' | 'gerencia' | 'admissao' | 'situacao'
+type OrdemColuna = 'nome' | 'matricula' | 'funcao' | 'base' | 'gerencia' |  'supervisor' | 'admissao' |  'demissao' | 'situacao' 
 type OrdemDirecao = 'asc' | 'desc'
-type FiltroCard = 'ATIVO' | 'AF.PREVIDENCIA' | 'APOS.INVALIDEZ' | 'DEMITIDO' | null
+type FiltroCard = 'ATIVO' | 'AF.PREVIDÊNCIA' | 'FÉRIAS' | 'AVISO PRÉVIO' | 'LICENÇA MATERNIDADE' | 'DEMITIDO' | null
 
-const SITUACOES = ['ATIVO', 'AF.PREVIDENCIA', 'APOS.INVALIDEZ', 'DEMITIDO']
+const SITUACOES = ['ATIVO', 'AF.PREVIDÊNCIA', 'AVISO PRÉVIO', 'FÉRIAS', 'LICENÇA MATERNIDADE', 'DEMITIDO']
 const POR_PAGINA = 50
 const COR = '#9f183c'
 
@@ -82,7 +83,9 @@ export default function ColaboradoresPage() {
   const [statsTotal, setStatsTotal] = useState(0)
   const [statsAtivo, setStatsAtivo] = useState(0)
   const [statsAfastado, setStatsAfastado] = useState(0)
-  const [statsAposentado, setStatsAposentado] = useState(0)
+  const [statsFerias, setStatsFerias] = useState(0)
+  const [statsAviso, setStatsAviso] = useState(0)
+  const [statsLicenca, setStatsLicenca] = useState(0)
   const [statsDemitido, setStatsDemitido] = useState(0)
   const [carregandoStats, setCarregandoStats] = useState(true)
 
@@ -102,19 +105,27 @@ export default function ColaboradoresPage() {
   const [excluindo, setExcluindo] = useState(false)
   const [erroExcluir, setErroExcluir] = useState<string | null>(null)
 
-  // ─── BUSCA STATS ─────────────────────────────────────────────────────────
+// ─── BUSCA STATS ─────────────────────────────────────────────────────────
 
-  async function buscarStats() {
-    setCarregandoStats(true)
-    const { data } = await supabase.from('colaboradores').select('situacao')
-    const todos = data || []
-    setStatsTotal(todos.length)
-    setStatsAtivo(todos.filter(c => c.situacao === 'ATIVO').length)
-    setStatsAfastado(todos.filter(c => c.situacao === 'AF.PREVIDENCIA').length)
-    setStatsAposentado(todos.filter(c => c.situacao === 'APOS.INVALIDEZ').length)
-    setStatsDemitido(todos.filter(c => c.situacao === 'DEMITIDO').length)
-    setCarregandoStats(false)
+async function buscarStats() {
+  setCarregandoStats(true)
+  let todos: any[] = []; let from = 0
+  while (true) {
+    const { data } = await supabase.from('colaboradores').select('situacao').range(from, from + 999)
+    if (!data || data.length === 0) break
+    todos = [...todos, ...data]
+    if (data.length < 1000) break
+    from += 1000
   }
+  setStatsTotal(todos.length)
+  setStatsAtivo(todos.filter(c => c.situacao === 'ATIVO').length)
+  setStatsAfastado(todos.filter(c => c.situacao === 'AF.PREVIDÊNCIA').length)
+  setStatsFerias(todos.filter(c => c.situacao === 'FÉRIAS').length)
+  setStatsAviso(todos.filter(c => c.situacao === 'AVISO PRÉVIO').length)
+  setStatsLicenca(todos.filter(c => c.situacao === 'LICENÇA MATERNIDADE').length)
+  setStatsDemitido(todos.filter(c => c.situacao === 'DEMITIDO').length)
+  setCarregandoStats(false)
+}
 
   // ─── BUSCA TABELA ─────────────────────────────────────────────────────────
 
@@ -126,9 +137,9 @@ export default function ColaboradoresPage() {
     let q = supabase
       .from('colaboradores')
       .select(
-        'matricula, nome, funcao_id, base_id, gerencia_id, contato, processo, data_admissao, data_demissao, email_corporativo, situacao, bases(nome), funcoes(nome), gerencias(sigla)',
-        { count: 'exact' }
-      )
+       'matricula, nome, funcao_id, base_id, gerencia_id, contato, processo, data_admissao, data_demissao, email_corporativo, situacao, gerencia, supervisor, bases(nome), funcoes(nome)',
+       { count: 'exact' }
+    )
       .order('nome')
       .range(from, to)
 
@@ -187,8 +198,9 @@ export default function ColaboradoresPage() {
     else if (ordemColuna === 'matricula') { vA = a.matricula; vB = b.matricula }
     else if (ordemColuna === 'funcao') { vA = a.funcoes?.nome || ''; vB = b.funcoes?.nome || '' }
     else if (ordemColuna === 'base') { vA = a.bases?.nome || ''; vB = b.bases?.nome || '' }
-    else if (ordemColuna === 'gerencia') { vA = a.gerencias?.sigla || ''; vB = b.gerencias?.sigla || '' }
+    else if (ordemColuna === 'supervisor') { vA = a.supervisor || ''; vB = b.supervisor || '' }
     else if (ordemColuna === 'admissao') { vA = a.data_admissao || ''; vB = b.data_admissao || '' }
+    else if (ordemColuna === 'demissao') { vA = a.data_demissao || ''; vB = b.data_demissao || '' }
     else if (ordemColuna === 'situacao') { vA = a.situacao; vB = b.situacao }
     return ordemDirecao === 'asc' ? vA.localeCompare(vB) : vB.localeCompare(vA)
   })
@@ -312,11 +324,13 @@ export default function ColaboradoresPage() {
       ) : (
         <div style={{ display: 'flex', gap: 12, marginBottom: 12, overflowX: 'auto', paddingBottom: 4 }}>
           {[
-            { label: 'Total', valor: statsTotal, cor: '#4a4a49', status: null },
-            { label: 'Ativos', valor: statsAtivo, cor: '#16a34a', status: 'ATIVO' as FiltroCard },
-            { label: 'Afastados', valor: statsAfastado, cor: '#b45309', status: 'AF.PREVIDENCIA' as FiltroCard },
-            { label: 'Aposentados', valor: statsAposentado, cor: '#2563eb', status: 'APOS.INVALIDEZ' as FiltroCard },
-            { label: 'Demitidos', valor: statsDemitido, cor: '#dc2626', status: 'DEMITIDO' as FiltroCard },
+        { label: 'Total',              valor: statsTotal,    cor: '#4a4a49', status: null },
+        { label: 'Ativos',             valor: statsAtivo,    cor: '#16a34a', status: 'ATIVO' as FiltroCard },
+        { label: 'AF. Previdência',    valor: statsAfastado, cor: '#b45309', status: 'AF.PREVIDÊNCIA' as FiltroCard },
+        { label: 'Férias',             valor: statsFerias,   cor: '#0284c7', status: 'FÉRIAS' as FiltroCard },
+        { label: 'Aviso Prévio',       valor: statsAviso,    cor: '#7c3aed', status: 'AVISO PRÉVIO' as FiltroCard },
+        { label: 'Licença Maternidade',valor: statsLicenca,  cor: '#db2777', status: 'LICENÇA MATERNIDADE' as FiltroCard },
+        { label: 'Demitidos',          valor: statsDemitido, cor: '#dc2626', status: 'DEMITIDO' as FiltroCard },
           ].map((card, i) => {
             const ativo = filtroCard === card.status && card.status !== null
             return (
@@ -348,19 +362,19 @@ export default function ColaboradoresPage() {
 
       {/* FILTROS */}
       <div style={{ display: 'flex', gap: 10, marginBottom: 12, flexWrap: 'wrap', alignItems: 'center' }}>
-        <input type="text" placeholder="Buscar por nome ou matrícula..." value={filtroBusca}
+        <input type="text" placeholder="🔍BUSCAR NOME OU MATRICULA" value={filtroBusca}
           onChange={e => setFiltroBusca(e.target.value)}
           style={{ ...selectStyle, width: 260 }} />
         <select value={filtroBase} onChange={e => setFiltroBase(e.target.value)} style={{ ...selectStyle, width: 180 }}>
-          <option value="">Todas as bases</option>
+          <option value="">TODAS AS BASES</option>
           {bases.map(b => <option key={b.id} value={b.id}>{b.nome}</option>)}
         </select>
         <select value={filtroFuncao} onChange={e => setFiltroFuncao(e.target.value)} style={{ ...selectStyle, width: 220 }}>
-          <option value="">Todas as funções</option>
+          <option value="">TODAS AS FUNCÕES</option>
           {funcoes.map(f => <option key={f.id} value={f.id}>{f.nome}</option>)}
         </select>
         <select value={filtroSituacao} onChange={e => { setFiltroSituacao(e.target.value); setFiltroCard(null) }} style={{ ...selectStyle, width: 160 }}>
-          <option value="">Todas as situações</option>
+          <option value="">TODAS AS SITUAÇÕES</option>
           {SITUACOES.map(s => <option key={s} value={s}>{s}</option>)}
         </select>
         <div style={{ flex: 1 }} />
@@ -387,7 +401,9 @@ export default function ColaboradoresPage() {
                   <ThOrdenavel label="Função" coluna="funcao" ordemAtual={ordemColuna} direcao={ordemDirecao} onClick={toggleOrdem} />
                   <ThOrdenavel label="Base" coluna="base" ordemAtual={ordemColuna} direcao={ordemDirecao} onClick={toggleOrdem} />
                   <ThOrdenavel label="Gerência" coluna="gerencia" ordemAtual={ordemColuna} direcao={ordemDirecao} onClick={toggleOrdem} />
+                  <ThOrdenavel label="Supervisor" coluna="supervisor" ordemAtual={ordemColuna} direcao={ordemDirecao} onClick={toggleOrdem} />
                   <ThOrdenavel label="Admissão" coluna="admissao" ordemAtual={ordemColuna} direcao={ordemDirecao} onClick={toggleOrdem} />
+                  <ThOrdenavel label="Demissão" coluna="demissao" ordemAtual={ordemColuna} direcao={ordemDirecao} onClick={toggleOrdem} />
                   <th style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 700, color: '#333', whiteSpace: 'nowrap', position: 'sticky', top: 0, backgroundColor: '#fafafa', zIndex: 3 }}>E-mail</th>
                   <ThOrdenavel label="Situação" coluna="situacao" ordemAtual={ordemColuna} direcao={ordemDirecao} onClick={toggleOrdem} />
                   <th style={{ padding: '10px 16px', position: 'sticky', top: 0, backgroundColor: '#fafafa', zIndex: 3 }} />
@@ -410,12 +426,18 @@ export default function ColaboradoresPage() {
                       <td style={{ padding: '10px 16px', color: '#666', whiteSpace: 'nowrap' }}>{c.funcoes?.nome || '—'}</td>
                       <td style={{ padding: '10px 16px', color: '#666', whiteSpace: 'nowrap' }}>{c.bases?.nome || '—'}</td>
                       <td style={{ padding: '10px 16px', color: '#666', whiteSpace: 'nowrap' }}>
-                        {c.gerencias?.sigla
-                          ? <span style={{ fontSize: 11, backgroundColor: '#fdf2f5', color: COR, padding: '2px 8px', borderRadius: 99, fontWeight: 600 }}>{c.gerencias.sigla}</span>
-                          : '—'}
-                      </td>
+                       {c.gerencia
+                   ? <span style={{ fontSize: 11, backgroundColor: '#fdf2f5', color: COR, padding: '2px 8px', borderRadius: 99, fontWeight: 600 }}>{c.gerencia}</span>
+                  : '—'}
+                  </td>
+                 <td style={{ padding: '10px 16px', color: '#666', whiteSpace: 'nowrap' }}>
+      {c.supervisor ? c.supervisor.trim().split(' ')[0] : '—'}
+</td>
+<td style={{ padding: '10px 16px', color: '#666', whiteSpace: 'nowrap' }}>
+  {c.data_admissao ? new Date(c.data_admissao + 'T12:00:00').toLocaleDateString('pt-BR') : '—'}
+</td>
                       <td style={{ padding: '10px 16px', color: '#666', whiteSpace: 'nowrap' }}>
-                        {c.data_admissao ? new Date(c.data_admissao + 'T12:00:00').toLocaleDateString('pt-BR') : '—'}
+                      {c.data_demissao ? new Date(c.data_demissao + 'T12:00:00').toLocaleDateString('pt-BR') : '—'}
                       </td>
                       <td style={{ padding: '10px 16px', color: '#666' }}>{c.email_corporativo || '—'}</td>
                       <td style={{ padding: '10px 16px' }}>
@@ -537,10 +559,18 @@ export default function ColaboradoresPage() {
                 <input value={form.contato} onChange={e => setForm({ ...form, contato: e.target.value })} style={inputStyle} placeholder="(69) 99999-9999" />
               </div>
               <div>
-                <label style={labelStyle}>Processo / Centro de Custo</label>
-                <input value={form.processo} onChange={e => setForm({ ...form, processo: e.target.value })} style={inputStyle} placeholder="Ex: 001-2024" />
-              </div>
               <div>
+               <label style={labelStyle}>Processo</label>
+               <select value={form.processo} onChange={e => setForm({ ...form, processo: e.target.value })} style={inputStyle}>
+               <option value="">Selecione...</option>
+                 {[
+                    'Administrativo', 'Almoxarifado', 'Construção', 'Corte e Religação',
+                    'Frota', 'Inspeção', 'Ligação Nova', 'Linha Viva', 'Manutenção',
+                    'Plantão', 'Poda', 'Qualidade e Equipamentos', 'Seed Money',
+                    'Segurança', 'Tat', 'Transporte'
+                   ].map(p => <option key={p} value={p}>{p}</option>)}
+                 </select>
+              </div>
                 <label style={labelStyle}>Data de Admissão</label>
                 <input type="date" value={form.data_admissao} onChange={e => setForm({ ...form, data_admissao: e.target.value })} style={inputStyle} />
               </div>

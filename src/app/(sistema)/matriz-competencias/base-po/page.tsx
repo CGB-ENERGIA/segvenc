@@ -60,7 +60,16 @@ function getObrig(colab: Colaborador, nomeTreinamento: string): StatusObrig {
 function isNACompleto(colab: Colaborador, treinamentos: Treinamento[], colunasVisiveis: string[]) {
   const treinamentosVisiveis = treinamentos.filter(t => colunasVisiveis.includes(`exame_${t.id}`))
   if (treinamentosVisiveis.length === 0) return false
-  return treinamentosVisiveis.every(t => getObrig(colab, t.nome) === 'NA')
+  return treinamentosVisiveis.every(t => {
+    const obrig = getObrig(colab, t.nome)
+    if (obrig === 'NA') return true
+    // NAO sem registro e sem data_vencimento também trata como N/A para efeito de filtro
+    if (obrig === 'NAO') {
+      const reg = colab.registros_exames.find(r => r.regra_id === t.id)
+      return !reg // sem registro = ocultar
+    }
+    return false
+  })
 }
 
 function calcStats(colabs: Colaborador[], treinamentos: Treinamento[]) {
@@ -277,6 +286,29 @@ function CelulaExame({ reg, onClick, onIcone, onClickNA, compacto, obrig }: {
   const pad = compacto ? '6px 8px' : '8px 12px'; const minW = compacto ? 120 : 150
   const base: React.CSSProperties = { padding: pad, textAlign: 'center', verticalAlign: 'middle', minWidth: minW, borderBottom: '1px solid #f5f5f5', borderRight: '1px solid #f0f0f0' }
 
+ // ── PRIMEIRO: registro sem data_vencimento → sempre "Possui" verde ─────────
+  if (reg && !reg.data_vencimento) {
+    const temArq = !!reg.url_arquivo
+    const aud = [...(reg.logs_auditoria || [])].sort((a, b) => new Date(b.data_auditoria).getTime() - new Date(a.data_auditoria).getTime())[0]
+    return <td style={{ ...base, backgroundColor: '#f0fdf4', cursor: 'pointer' }} onClick={onClick}>
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          <Icone tipo="check" cor="#16a34a" size={13} />
+          <span style={{ fontSize: compacto ? 10 : 11, color: '#16a34a', fontWeight: 600 }}>Possui</span>
+        </div>
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+          <span onClick={e => { e.stopPropagation(); onIcone('documento') }} style={{ cursor: 'pointer', display: 'flex' }}>
+            <Icone tipo="clipe" cor={temArq ? '#2563eb' : '#9ca3af'} size={13} />
+          </span>
+          {!aud && <Icone tipo="relogio" cor="#9ca3af" titulo="Pendente" size={13} />}
+          {aud?.validado && <Icone tipo="check" cor="#16a34a" titulo="Validado" size={13} />}
+          {aud && !aud.validado && <Icone tipo="x_circulo" cor="#dc2626" titulo="Reprovado" size={13} />}
+        </div>
+      </div>
+    </td>
+  }
+
+
   // ── N/A: clicável para mudar para SIM ──────────────────────────────────────
   if (obrig === 'NA') return (
     <td style={{ ...base, background: 'repeating-linear-gradient(45deg,#fdfdfd,#fdfdfd 8px,#efefef 8px,#efefef 16px)', cursor: 'pointer' }}
@@ -287,6 +319,7 @@ function CelulaExame({ reg, onClick, onIcone, onClickNA, compacto, obrig }: {
       </div>
     </td>
   )
+
 
   if (obrig === 'NAO' && !reg) return (
     <td style={{ ...base, backgroundColor: '#f9f9f9', cursor: 'pointer' }} onClick={onClick} title="Opcional — clique para adicionar">
@@ -582,21 +615,41 @@ export default function BasePOPage() {
     }
 
     const matriculas = todos.map((c: any) => c.matricula)
+    
+   // Busca matriz_po em lotes de 100
+    const matrizDataArr: any[] = []
+    if (matriculas.length > 0) {
+      const LOTE = 100
+      for (let i = 0; i < matriculas.length; i += LOTE) {
+        const lote = matriculas.slice(i, i + LOTE)
+        const { data: md } = await supabase.from('matriz_po')
+          .select('matricula,direcao_defensiva,pilotagem_defensiva')
+          .in('matricula', lote)
+        if (md) matrizDataArr.push(...md)
+      }
+    }
+    const matrizMap = Object.fromEntries(matrizDataArr.map((m: any) => [m.matricula, m]))
 
-    // Busca matriz_po
-    const { data: matrizData } = matriculas.length > 0
-      ? await supabase.from('matriz_po').select('matricula,direcao_defensiva,pilotagem_defensiva').in('matricula', matriculas)
-      : { data: [] }
-    const matrizMap = Object.fromEntries((matrizData || []).map((m: any) => [m.matricula, m]))
-
-    // Busca registros
+   // Busca registros em lotes de 100 (evita truncamento do Supabase)
     const rids = ts.map(t => t.id)
-    const { data: regs } = matriculas.length > 0 && rids.length > 0
-      ? await supabase.from('registros_exames')
-        .select('id,matricula_colaborador,regra_id,data_realizacao,data_vencimento,url_arquivo,logs_auditoria(id,auditor_email,data_auditoria,validado,observacao),programacoes_exames(id,data_programada,observacao,criado_por,created_at)')
-        .eq('is_atual', true).in('regra_id', rids).in('matricula_colaborador', matriculas)
-      : { data: [] }
-
+    let regs: any[] = []
+    if (matriculas.length > 0 && rids.length > 0) {
+      const LOTE = 100
+      for (let i = 0; i < matriculas.length; i += LOTE) {
+        const loteMats = matriculas.slice(i, i + LOTE)
+        let fromReg = 0
+        while (true) {
+          const { data: rd } = await supabase.from('registros_exames')
+            .select('id,matricula_colaborador,regra_id,data_realizacao,data_vencimento,url_arquivo,logs_auditoria(id,auditor_email,data_auditoria,validado,observacao),programacoes_exames(id,data_programada,observacao,criado_por,created_at)')
+            .eq('is_atual', true).in('regra_id', rids).in('matricula_colaborador', loteMats)
+            .range(fromReg, fromReg + 499)
+          if (!rd || rd.length === 0) break
+          regs = [...regs, ...rd]
+          if (rd.length < 500) break
+          fromReg += 500
+        }
+      }
+    }
     setColabs(todos.map((c: any) => {
       const mz = matrizMap[c.matricula] || {}
       return {
