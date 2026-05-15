@@ -543,6 +543,121 @@ function ModalExame({ dados, abaInicial, onClose, onUpdate, email, podeAuditar, 
   )
 }
 
+// ─── MODAL GERENCIAR COLABORADORES BASE PO ────────────────────────────────────
+function ModalGerenciarColabPO({ onClose, onUpdate }: {
+  onClose: () => void; onUpdate: () => void
+}) {
+  const [busca, setBusca] = useState('')
+  const [resultados, setResultados] = useState<{ matricula: string; nome: string; na_base: boolean }[]>([])
+  const [carregando, setCarregando] = useState(false)
+  const [salvando, setSalvando] = useState<string | null>(null)
+
+  async function pesquisar() {
+    if (!busca.trim()) return
+    setCarregando(true)
+    const { data: colabs } = await supabase.from('colaboradores')
+      .select('matricula, nome')
+      .or(`nome.ilike.%${busca}%,matricula.ilike.%${busca}%`)
+      .not('situacao', 'in', '("DEMITIDO","AF.PREVIDÊNCIA","LICENÇA MATERNIDADE")')
+      .order('nome').limit(20)
+
+    if (!colabs?.length) { setResultados([]); setCarregando(false); return }
+
+    const mats = colabs.map((c: any) => c.matricula)
+    const { data: naBase } = await supabase.from('matriz_po').select('matricula').in('matricula', mats)
+    const naBaseSet = new Set((naBase || []).map((m: any) => m.matricula))
+
+    setResultados(colabs.map((c: any) => ({
+      matricula: c.matricula,
+      nome: c.nome,
+      na_base: naBaseSet.has(c.matricula),
+    })))
+    setCarregando(false)
+  }
+
+  async function incluir(matricula: string) {
+    setSalvando(matricula)
+    await supabase.from('matriz_po').upsert(
+      { matricula, direcao_defensiva: 'N/A', pilotagem_defensiva: 'NÃO' },
+      { onConflict: 'matricula' }
+    )
+    setResultados(r => r.map(c => c.matricula === matricula ? { ...c, na_base: true } : c))
+    setSalvando(null)
+    onUpdate()
+  }
+
+  async function excluir(matricula: string) {
+    setSalvando(matricula)
+    await supabase.from('matriz_po').delete().eq('matricula', matricula)
+    setResultados(r => r.map(c => c.matricula === matricula ? { ...c, na_base: false } : c))
+    setSalvando(null)
+    onUpdate()
+  }
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 300 }}>
+      <div style={{ backgroundColor: 'white', borderRadius: 16, padding: 28, width: '100%', maxWidth: 540, maxHeight: '80vh', display: 'flex', flexDirection: 'column', boxShadow: '0 20px 60px rgba(0,0,0,0.2)' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+          <div>
+            <h2 style={{ fontSize: 16, fontWeight: 600, color: '#1a1a1a', margin: 0 }}>Gerenciar Colaboradores</h2>
+            <p style={{ fontSize: 12, color: '#888', margin: '3px 0 0' }}>Incluir ou remover colaboradores da BASE PO</p>
+          </div>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: '#aaa' }}>✕</button>
+        </div>
+
+        <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+          <input
+            type="text" value={busca}
+            onChange={e => setBusca(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && pesquisar()}
+            placeholder="Buscar por nome ou matrícula..."
+            style={{ flex: 1, height: 38, border: '1px solid #e0e0e0', borderRadius: 8, padding: '0 12px', fontSize: 13, outline: 'none' }}
+          />
+          <button onClick={pesquisar} disabled={carregando} style={{ height: 38, padding: '0 18px', backgroundColor: COR, color: 'white', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 500, cursor: carregando ? 'not-allowed' : 'pointer', opacity: carregando ? 0.7 : 1 }}>
+            {carregando ? 'Buscando...' : 'Buscar'}
+          </button>
+        </div>
+
+        <div style={{ flex: 1, overflowY: 'auto' }}>
+          {resultados.length === 0 && !carregando && (
+            <div style={{ textAlign: 'center', padding: '40px 0', color: '#bbb', fontSize: 13 }}>
+              Digite um nome ou matrícula e clique em Buscar
+            </div>
+          )}
+          {resultados.map(c => (
+            <div key={c.matricula} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', borderRadius: 10, marginBottom: 6, backgroundColor: c.na_base ? '#f0fdf4' : '#fafafa', border: `1px solid ${c.na_base ? '#bbf7d0' : '#e0e0e0'}` }}>
+              <div>
+                <p style={{ fontSize: 13, fontWeight: 600, color: '#1a1a1a', margin: 0 }}>{c.nome}</p>
+                <p style={{ fontSize: 12, color: '#888', margin: '2px 0 0' }}>{c.matricula}</p>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 99, backgroundColor: c.na_base ? '#dcfce7' : '#f4f4f4', color: c.na_base ? '#16a34a' : '#888', fontWeight: 500 }}>
+                  {c.na_base ? '✓ Na BASE PO' : 'Fora da BASE PO'}
+                </span>
+                {c.na_base ? (
+                  <button onClick={() => excluir(c.matricula)} disabled={salvando === c.matricula}
+                    style={{ height: 32, padding: '0 14px', fontSize: 12, border: '1px solid #fca5a5', borderRadius: 8, backgroundColor: '#fef2f2', color: '#dc2626', cursor: salvando === c.matricula ? 'not-allowed' : 'pointer', opacity: salvando === c.matricula ? 0.6 : 1 }}>
+                    {salvando === c.matricula ? '...' : 'Remover'}
+                  </button>
+                ) : (
+                  <button onClick={() => incluir(c.matricula)} disabled={salvando === c.matricula}
+                    style={{ height: 32, padding: '0 14px', fontSize: 12, border: '1px solid #bbf7d0', borderRadius: 8, backgroundColor: '#f0fdf4', color: '#16a34a', cursor: salvando === c.matricula ? 'not-allowed' : 'pointer', opacity: salvando === c.matricula ? 0.6 : 1 }}>
+                    {salvando === c.matricula ? '...' : 'Incluir'}
+                  </button>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div style={{ marginTop: 16, paddingTop: 16, borderTop: '1px solid #f0f0f0', display: 'flex', justifyContent: 'flex-end' }}>
+          <button onClick={onClose} style={{ height: 38, padding: '0 20px', border: '1px solid #e0e0e0', borderRadius: 8, fontSize: 13, cursor: 'pointer', background: 'white', color: '#555' }}>Fechar</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ─── PÁGINA PRINCIPAL ─────────────────────────────────────────────────────────
 export default function BasePOPage() {
   const router = useRouter(); const { usuario } = useAuth()
@@ -556,6 +671,7 @@ export default function BasePOPage() {
   const [situacoesDisp, setSituacoesDisp] = useState<string[]>([])
   const [filtroSup, setFiltroSup] = useState('')
   const [filtroStatus, setFiltroStatus] = useState<'valido' | 'proximo' | 'vencido' | 'programado' | null>(null)
+  const [modalGerenciar, setModalGerenciar] = useState(false)
   // Filtro N/A: por padrão oculta colaboradores N/A em todas as colunas visíveis
   const [ocultarNACompleto, setOcultarNACompleto] = useState(true)
   const [compacto, setCompacto] = useState(false)
@@ -793,6 +909,9 @@ export default function BasePOPage() {
       <select value={filtroSup} onChange={e => setFiltroSup(e.target.value)} style={{ ...sel, width: 160 }}>
         <option value="">Todos os supervisores</option>{supervisoresDisp.map(s => <option key={s} value={s}>{primeiroNome(s)}</option>)}
       </select>
+      <button onClick={() => setModalGerenciar(true)} style={{ height: 36, padding: '0 12px', fontSize: 12, border: '1px solid #e0e0e0', borderRadius: 8, backgroundColor: 'white', color: '#555', cursor: 'pointer' }}>
+  👥 Gerenciar
+</button>
       {/* Toggle filtro N/A */}
       <button
         onClick={() => setOcultarNACompleto(v => !v)}
@@ -865,5 +984,13 @@ export default function BasePOPage() {
     {modalExame && <ModalExame dados={modalExame} abaInicial={modalExame.abaInicial} onClose={() => setModalExame(null)} onUpdate={() => buscarColabs(treinamentos)} email={usuario?.email || ''} podeAuditar={usuario?.pode_auditar || false} nivel={usuario?.nivel || 'visualizador'} />}
     {modalNovo && <ModalNovoExame colab={modalNovo.colab} treinamentos={treinamentos} treinamentoPreSelecionado={modalNovo.treinamentoId} onClose={() => setModalNovo(null)} onUpdate={() => buscarColabs(treinamentos)} email={usuario?.email || ''} />}
     {modalNA && <ModalConfirmarNA colab={modalNA.colab} treinamento={modalNA.treinamento} onClose={() => setModalNA(null)} onConfirmar={() => handleConfirmarNA(modalNA.treinamento, modalNA.colab)} />}
+    {modalGerenciar && (
+  <ModalGerenciarColabPO 
+    onClose={() => setModalGerenciar(false)} 
+    onUpdate={async () => {
+      await buscarColabs(treinamentos, null)
+    }} 
+  />
+)}
   </div>
 }
