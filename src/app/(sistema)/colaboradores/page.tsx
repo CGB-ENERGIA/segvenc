@@ -30,10 +30,10 @@ interface Gerencia {
   sigla: string
   nome: string
   gerente_matricula: string | null
-  colaboradores?: { nome: string } | null
 }
+interface Supervisor { id: number; nome: string }
 
-type OrdemColuna = 'nome' | 'matricula' | 'funcao' | 'base' | 'gerencia' |  'supervisor' | 'admissao' |  'demissao' | 'situacao' 
+type OrdemColuna = 'nome' | 'matricula' | 'funcao' | 'processo' | 'base' | 'gerencia' |  'supervisor' | 'admissao' |  'demissao' | 'situacao' 
 type OrdemDirecao = 'asc' | 'desc'
 type FiltroCard = 'ATIVO' | 'AF.PREVIDÊNCIA' | 'FÉRIAS' | 'AVISO PRÉVIO' | 'LICENÇA MATERNIDADE' | 'DEMITIDO' | null
 
@@ -71,6 +71,7 @@ export default function ColaboradoresPage() {
   const [bases, setBases] = useState<Base[]>([])
   const [funcoes, setFuncoes] = useState<Funcao[]>([])
   const [gerencias, setGerencias] = useState<Gerencia[]>([])
+  const [supervisores, setSupervisores] = useState<Supervisor[]>([])
   const [carregando, setCarregando] = useState(true)
   const [filtroBase, setFiltroBase] = useState('')
   const [filtroFuncao, setFiltroFuncao] = useState('')
@@ -94,11 +95,11 @@ export default function ColaboradoresPage() {
   const [erro, setErro] = useState<string | null>(null)
   const [ordemColuna, setOrdemColuna] = useState<OrdemColuna>('nome')
   const [ordemDirecao, setOrdemDirecao] = useState<OrdemDirecao>('asc')
-  const [form, setForm] = useState({
-    matricula: '', nome: '', funcao_id: '', base_id: '',
-    gerencia_id: '', contato: '', processo: '',
-    data_admissao: '', data_demissao: '', email_corporativo: '', situacao: 'ATIVO',
-  })
+const [form, setForm] = useState({
+  matricula: '', nome: '', funcao_id: '', base_id: '',
+  gerencia: '', contato: '', processo: '', supervisor: '',
+  data_admissao: '', data_demissao: '', email_corporativo: '', situacao: 'ATIVO',
+})
   const [editando, setEditando] = useState<string | null>(null)
   const [modalExcluirAberto, setModalExcluirAberto] = useState(false)
   const [confirmacaoMatricula, setConfirmacaoMatricula] = useState('')
@@ -156,16 +157,16 @@ async function buscarStats() {
 
   useEffect(() => {
     async function init() {
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) { router.push('/login'); return }
-      const [{ data: b }, { data: f }, { data: g }] = await Promise.all([
-        supabase.from('bases').select('id, nome').order('nome'),
-        supabase.from('funcoes').select('id, nome').order('nome'),
-        supabase.from('gerencias').select('id, sigla, nome, gerente_matricula, colaboradores(nome)').order('sigla'),
-      ])
-      setBases(b || [])
-      setFuncoes(f || [])
-      setGerencias((g as unknown as Gerencia[]) || [])
+    const [{ data: b }, { data: f }, { data: g }, { data: s }] = await Promise.all([
+  supabase.from('bases').select('id, nome').order('nome'),
+  supabase.from('funcoes').select('id, nome').order('nome'),
+  supabase.from('gerencias').select('id, sigla, nome, gerente_matricula').order('sigla'),
+  supabase.from('supervisores').select('id, nome').order('nome'),
+])
+setBases(b || [])
+setFuncoes(f || [])
+setGerencias((g as unknown as Gerencia[]) || [])
+setSupervisores((s as unknown as Supervisor[]) || [])
       await Promise.all([buscar('', '', 'ATIVO', 1, ''), buscarStats()])
     }
     init()
@@ -197,6 +198,7 @@ async function buscarStats() {
     if (ordemColuna === 'nome') { vA = a.nome; vB = b.nome }
     else if (ordemColuna === 'matricula') { vA = a.matricula; vB = b.matricula }
     else if (ordemColuna === 'funcao') { vA = a.funcoes?.nome || ''; vB = b.funcoes?.nome || '' }
+    else if (ordemColuna === 'processo') { vA = a.processo || ''; vB = b.processo || '' }
     else if (ordemColuna === 'base') { vA = a.bases?.nome || ''; vB = b.bases?.nome || '' }
     else if (ordemColuna === 'supervisor') { vA = a.supervisor || ''; vB = b.supervisor || '' }
     else if (ordemColuna === 'admissao') { vA = a.data_admissao || ''; vB = b.data_admissao || '' }
@@ -209,7 +211,7 @@ async function buscarStats() {
     setEditando(null)
     setForm({
       matricula: '', nome: '', funcao_id: '', base_id: '',
-      gerencia_id: '', contato: '', processo: '',
+      gerencia: '', supervisor: '', contato: '', processo: '',
       data_admissao: '', data_demissao: '', email_corporativo: '', situacao: 'ATIVO',
     })
     setErro(null)
@@ -222,7 +224,8 @@ async function buscarStats() {
       matricula: c.matricula, nome: c.nome,
       funcao_id: c.funcao_id?.toString() || '',
       base_id: c.base_id?.toString() || '',
-      gerencia_id: c.gerencia_id?.toString() || '',
+      gerencia: c.gerencia || '',
+      supervisor: c.supervisor || '',
       contato: c.contato || '',
       processo: c.processo || '',
       data_admissao: c.data_admissao || '',
@@ -241,7 +244,8 @@ async function buscarStats() {
       matricula: form.matricula, nome: form.nome.toUpperCase(),
       funcao_id: form.funcao_id ? parseInt(form.funcao_id) : null,
       base_id: form.base_id ? parseInt(form.base_id) : null,
-      gerencia_id: form.gerencia_id ? parseInt(form.gerencia_id) : null,
+      gerencia: form.gerencia || null,
+      supervisor: form.supervisor || null,
       contato: form.contato || null,
       processo: form.processo || null,
       data_admissao: form.data_admissao || null,
@@ -281,8 +285,6 @@ async function buscarStats() {
     if (s === 'APOS.INVALIDEZ') return { bg: '#eff6ff', cor: '#2563eb' }
     return { bg: '#fef2f2', cor: '#dc2626' }
   }
-
-  const gerenciaSelecionada = gerencias.find(g => g.id.toString() === form.gerencia_id)
 
   const inputStyle: React.CSSProperties = {
     width: '100%', height: 38, border: '1px solid #e0e0e0', borderRadius: 8,
@@ -399,6 +401,7 @@ async function buscarStats() {
                   <ThOrdenavel label="Nome" coluna="nome" ordemAtual={ordemColuna} direcao={ordemDirecao} onClick={toggleOrdem} style={{ minWidth: 200 }} />
                   <ThOrdenavel label="Matrícula" coluna="matricula" ordemAtual={ordemColuna} direcao={ordemDirecao} onClick={toggleOrdem} />
                   <ThOrdenavel label="Função" coluna="funcao" ordemAtual={ordemColuna} direcao={ordemDirecao} onClick={toggleOrdem} />
+                  <ThOrdenavel label="Processo" coluna="processo" ordemAtual={ordemColuna} direcao={ordemDirecao} onClick={toggleOrdem} />
                   <ThOrdenavel label="Base" coluna="base" ordemAtual={ordemColuna} direcao={ordemDirecao} onClick={toggleOrdem} />
                   <ThOrdenavel label="Gerência" coluna="gerencia" ordemAtual={ordemColuna} direcao={ordemDirecao} onClick={toggleOrdem} />
                   <ThOrdenavel label="Supervisor" coluna="supervisor" ordemAtual={ordemColuna} direcao={ordemDirecao} onClick={toggleOrdem} />
@@ -424,18 +427,19 @@ async function buscarStats() {
                       <td style={{ padding: '10px 16px', fontWeight: 500, color: '#333', whiteSpace: 'nowrap' }}>{c.nome}</td>
                       <td style={{ padding: '10px 16px', color: '#666' }}>{c.matricula}</td>
                       <td style={{ padding: '10px 16px', color: '#666', whiteSpace: 'nowrap' }}>{c.funcoes?.nome || '—'}</td>
+                      <td style={{ padding: '10px 16px', color: '#666', whiteSpace: 'nowrap' }}>{c.processo || '—'}</td>
                       <td style={{ padding: '10px 16px', color: '#666', whiteSpace: 'nowrap' }}>{c.bases?.nome || '—'}</td>
                       <td style={{ padding: '10px 16px', color: '#666', whiteSpace: 'nowrap' }}>
                        {c.gerencia
                    ? <span style={{ fontSize: 11, backgroundColor: '#fdf2f5', color: COR, padding: '2px 8px', borderRadius: 99, fontWeight: 600 }}>{c.gerencia}</span>
                   : '—'}
-                  </td>
-                 <td style={{ padding: '10px 16px', color: '#666', whiteSpace: 'nowrap' }}>
-      {c.supervisor ? c.supervisor.trim().split(' ')[0] : '—'}
-</td>
-<td style={{ padding: '10px 16px', color: '#666', whiteSpace: 'nowrap' }}>
-  {c.data_admissao ? new Date(c.data_admissao + 'T12:00:00').toLocaleDateString('pt-BR') : '—'}
-</td>
+                     </td>
+                       <td style={{ padding: '10px 16px', color: '#666', whiteSpace: 'nowrap' }}>
+                      {c.supervisor ? c.supervisor.trim().split(' ')[0] : '—'}
+                     </td>
+                      <td style={{ padding: '10px 16px', color: '#666', whiteSpace: 'nowrap' }}>
+                      {c.data_admissao ? new Date(c.data_admissao + 'T12:00:00').toLocaleDateString('pt-BR') : '—'}
+                      </td>
                       <td style={{ padding: '10px 16px', color: '#666', whiteSpace: 'nowrap' }}>
                       {c.data_demissao ? new Date(c.data_demissao + 'T12:00:00').toLocaleDateString('pt-BR') : '—'}
                       </td>
@@ -544,16 +548,18 @@ async function buscarStats() {
               </div>
               <div style={{ gridColumn: '1 / -1' }}>
                 <label style={labelStyle}>Gerência</label>
-                <select value={form.gerencia_id} onChange={e => setForm({ ...form, gerencia_id: e.target.value })} style={inputStyle}>
-                  <option value="">Selecione...</option>
-                  {gerencias.map(g => <option key={g.id} value={g.id}>{g.sigla} — {g.nome}</option>)}
-                </select>
-                {gerenciaSelecionada?.colaboradores?.nome && (
-                  <p style={{ fontSize: 11, color: '#888', margin: '4px 0 0' }}>
-                    Gerente: {gerenciaSelecionada.colaboradores.nome}
-                  </p>
-                )}
+            <select value={form.gerencia} onChange={e => setForm({ ...form, gerencia: e.target.value })} style={inputStyle}>
+  <option value="">Selecione...</option>
+  {gerencias.map(g => <option key={g.sigla} value={g.sigla}>{g.sigla} — {g.nome}</option>)}
+</select>
               </div>
+            <div style={{ gridColumn: '1 / -1' }}>
+             <label style={labelStyle}>Supervisor</label>
+            <select value={form.supervisor} onChange={e => setForm({ ...form, supervisor: e.target.value })} style={inputStyle}>
+            <option value="">Selecione...</option>
+    {supervisores.map(s => <option key={s.id} value={s.nome}>{s.nome}</option>)}
+  </select>
+                </div>
               <div>
                 <label style={labelStyle}>Contato (telefone)</label>
                 <input value={form.contato} onChange={e => setForm({ ...form, contato: e.target.value })} style={inputStyle} placeholder="(69) 99999-9999" />
