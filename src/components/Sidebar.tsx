@@ -215,7 +215,7 @@ interface ItemMenu {
 export default function Sidebar() {
   const pathname = usePathname()
   const router = useRouter()
-  const { usuario } = useAuth()
+  const { usuario, carregando } = useAuth()
   const [recolhida, setRecolhida] = useState(false)
   const [tooltip, setTooltip] = useState('')
   const [menuAberto, setMenuAberto] = useState(false)
@@ -294,12 +294,14 @@ export default function Sidebar() {
     { label: 'Configurações',          href: '/configuracoes',        niveis: ['admin'],                             modulo: null },
   ]
 
-  const itensFiltrados = usuario
+const itensFiltrados = carregando
+  ? []
+  : usuario
     ? todosItens.filter(item => {
         if (item.modulo) return usuario.nivel === 'admin' || (usuario.modulos_acesso || []).includes(item.modulo)
         return item.niveis.includes(usuario.nivel)
       })
-    : todosItens
+    : []
 
   const largura = recolhida ? LARGURA_RECOLHIDA : LARGURA_EXPANDIDA
 
@@ -335,17 +337,14 @@ export default function Sidebar() {
         flexShrink: 0
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, overflow: 'hidden', whiteSpace: 'nowrap' }}>
-          {recolhida ? (
-             <div style={{ width: 32, height: 32, backgroundColor: COR_PRIMARIA, borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontWeight: 'bold', fontSize: 16, flexShrink: 0 }}>C</div>
-          ) : (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12, animation: 'fadeIn 0.3s ease-in-out' }}>
-               <div style={{ width: 32, height: 32, backgroundColor: COR_PRIMARIA, borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontWeight: 'bold', fontSize: 16 }}>C</div>
-               <span style={{ fontSize: 18, fontWeight: 800, color: '#333', letterSpacing: '-0.02em' }}>CGB</span>
-               <span style={{ fontSize: 15, fontWeight: 600, color: COR_TEXTO_SECUNDARIO }}>SegVenc</span>
-            </div>
-          )}
-        </div>
-
+{recolhida ? (
+  <img src="/icon-cgb.png" alt="CGB" style={{ width: 36, height: 36, objectFit: 'contain' }} />
+) : (
+  <div style={{ display: 'flex', alignItems: 'center', gap: 12, animation: 'fadeIn 0.3s ease-in-out' }}>
+    <img src="/logo-cgb.png" alt="CGB SegVenc" style={{ height: 36, objectFit: 'contain' }} />
+  </div>
+)}
+ </div>
         {!recolhida && (
           <button 
             onClick={toggleSidebar}

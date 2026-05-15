@@ -26,7 +26,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     async function carregarUsuario() {
+      console.log('iniciando carregamento...')
+      setCarregando(true)
       const { data: { user } } = await supabase.auth.getUser()
+      console.log('user:', user?.email)
+
       if (!user) { setCarregando(false); return }
 
       const { data: perfil } = await supabase
@@ -37,7 +41,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       if (!perfil) { setCarregando(false); return }
 
-      // Buscar bases vinculadas (admin vê tudo)
       let bases: number[] = []
       if (perfil.nivel !== 'admin') {
         const { data: ub } = await supabase
@@ -57,13 +60,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         modulos_acesso: perfil.modulos_acesso || [],
       })
       setCarregando(false)
+      console.log('carregamento finalizado')
     }
 
     carregarUsuario()
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(() => {
-      carregarUsuario()
-    })
+  const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
+  if (event === 'SIGNED_OUT') {
+    setUsuario(null)
+    setCarregando(false)
+  }
+})
 
     return () => subscription.unsubscribe()
   }, [])
