@@ -7,7 +7,7 @@ import { useAuth } from '@/lib/auth-context'
 
 // ─── CONSTANTES ───────────────────────────────────────────────────────────────
 const COR = '#9f183c'
-const NRS_ALVO = ['NR 10-B', 'NR 11', 'NR 12', 'NR 35']
+const NRS_ALVO = ['NR 10-B', 'NR 11', 'NR 12 - II', 'NR 12 - V', 'NR 12 - XII', 'NR 35']
 const COL_MATRICULA = 110
 const COL_NOME = 230
 // Situações excluídas por padrão ao abrir a página
@@ -32,7 +32,10 @@ function primeiroNome(s: string | null) { return s ? s.trim().split(' ')[0] : '�
 function formatarData(d: string | null) { return d ? new Date(d + 'T12:00:00').toLocaleDateString('pt-BR') : '—' }
 function getStatus(dv: string) {
   const diff = (new Date(dv).getTime() - new Date().getTime()) / 86400000
-  return diff < 0 ? 'vencido' : diff <= 30 ? 'proximo' : 'valido'
+  if (diff < 0) return 'vencido'
+  if (diff <= 30) return 'atencao'
+  if (diff <= 60) return 'critico'
+  return 'valido'
 }
 function getDias(dv: string) { return Math.ceil((new Date(dv).getTime() - new Date().getTime()) / 86400000) }
 
@@ -55,7 +58,7 @@ function getObrigatoriedade(matriz: MatrizTreinamento[], funcaoColab: string | n
 }
 
 function calcStats(colabs: Colaborador[], nrs: NR[], colunasVisiveis: string[], matriz: MatrizTreinamento[]) {
-  let v = 0, p = 0, vc = 0, prog = 0
+  let v = 0, c60 = 0, c30 = 0, vc = 0, prog = 0
   colabs.forEach(c => {
     nrs.filter(nr => colunasVisiveis.includes(`nr_${nr.id}`)).forEach(nr => {
       if (getObrigatoriedade(matriz, c.funcoes?.nome || null, c.processo, nr.nome) !== 'SIM') return
@@ -64,12 +67,13 @@ function calcStats(colabs: Colaborador[], nrs: NR[], colunasVisiveis: string[], 
       if (nr.validade_dias === null) { v++; return }
       const s = getStatus(r.data_vencimento!)
       if (s === 'valido') v++
-      else if (s === 'proximo') p++
+      else if (s === 'critico') c60++
+      else if (s === 'atencao') c30++
       else vc++
-      if ((s === 'proximo' || s === 'vencido') && (r.programacoes || []).some(p => p.data_programada >= hoje)) prog++
+      if ((s === 'critico' || s === 'atencao' || s === 'vencido') && (r.programacoes || []).some(p => p.data_programada >= hoje)) prog++
     })
   })
-  return { validos: v, proximos: p, vencidos: vc, programados: prog }
+  return { validos: v, criticos: c60, atencao: c30, vencidos: vc, programados: prog }
 }
 
 const hoje = new Date().toISOString().split('T')[0]
@@ -91,7 +95,7 @@ function gerarExport(colabs: Colaborador[], nrs: NR[], matriz: MatrizTreinamento
       if (nr.validade_dias === null) { l[nr.nome] = 'Possui'; return }
       const s = getStatus(r.data_vencimento!)
       l[`${nr.nome} - Vencimento`] = formatarData(r.data_vencimento)
-      l[`${nr.nome} - Status`] = s === 'valido' ? 'Válido' : s === 'proximo' ? 'A vencer' : 'Vencido'
+      l[`${nr.nome} - Status`] = s === 'valido' ? 'Válido' : s === 'critico' ? 'Prazo Crítico' : s === 'atencao' ? 'Bernhoeft c/ Atenção' : 'Vencido'
       l[`${nr.nome} - Documento`] = r.url_arquivo ? 'Com documento' : 'Sem documento'
     })
     return l
@@ -290,8 +294,8 @@ function CelulaNR({ reg, semPrazo, onClick, onIcone, compacto, obrig }: {
   const aud = [...(reg.logs_auditoria || [])].sort((a, b) => new Date(b.data_auditoria).getTime() - new Date(a.data_auditoria).getTime())[0]
   const prog = [...(reg.programacoes || [])].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0]
   const bgMap: Record<string, string> = obrig === 'NAO'
-    ? { valido: '#f4f4f4', proximo: '#fafafa', vencido: '#fafafa' }
-    : { valido: '#f0fdf4', proximo: '#fffbeb', vencido: '#fef2f2' }
+    ? { valido: '#f4f4f4', critico: '#fafafa', atencao: '#fafafa', vencido: '#fafafa' }
+    : { valido: '#f0fdf4', critico: '#fffbeb', atencao: '#fef9c3', vencido: '#fef2f2' }
 
   return <td style={{ ...base, backgroundColor: bgMap[st], cursor: 'pointer' }} onClick={onClick}>
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
@@ -503,7 +507,7 @@ export default function BaseNRPage() {
   const [situacoesDisponiveis, setSituacoesDisp] = useState<string[]>([])
   const [filtroGer, setFiltroGer] = useState('')
   const [filtroSup, setFiltroSup] = useState('')
-  const [filtroStatus, setFiltroStatus] = useState<'valido' | 'proximo' | 'vencido' | 'programado' | null>(null)
+  const [filtroStatus, setFiltroStatus] = useState<'valido' | 'critico' | 'atencao' | 'vencido' | 'programado' | null>(null)
   const [compacto, setCompacto] = useState(false)
   const [colunas, setColunas] = useState<string[]>([])
   const [ordCol, setOrdCol] = useState<OrdemColuna>('nome')
@@ -639,14 +643,14 @@ export default function BaseNRPage() {
    return nrsVis.some(nr => {
   if (getObrigatoriedade(matriz, c.funcoes?.nome || null, c.processo, nr.nome) !== 'SIM') return false
   const r = c.registros_exames.find(r => r.regra_id === nr.id)
-  if (filtroStatus === 'programado') {
-    if (!r || nr.validade_dias === null) return false
-    const s = getStatus(r.data_vencimento!)
-    return (s === 'proximo' || s === 'vencido') && (r.programacoes || []).some(p => p.data_programada >= hoje)
-  }
-  if (!r) return filtroStatus === 'vencido'
-  if (nr.validade_dias === null) return false
-  return getStatus(r.data_vencimento!) === filtroStatus
+if (filtroStatus === 'programado') {
+  if (!r || nr.validade_dias === null) return false
+  const s = getStatus(r.data_vencimento!)
+  return (s === 'critico' || s === 'atencao' || s === 'vencido') && (r.programacoes || []).some(p => p.data_programada >= hoje)
+}
+if (!r) return filtroStatus === 'vencido'
+if (nr.validade_dias === null) return false
+return getStatus(r.data_vencimento!) === filtroStatus
 })
     })
   }, [semStatus, filtroStatus, nrs, colunas, matriz])
@@ -704,11 +708,12 @@ export default function BaseNRPage() {
     </div>
   : <div style={{ display: 'flex', gap: 12, marginBottom: 12, overflowX: 'auto', paddingBottom: 4 }}>
       {[
-        { label: 'Colaboradores', valor: filtrados.length, cor: '#4a4a49', status: null },
-        { label: 'Treinamentos Válidos', valor: stats.validos, cor: '#16a34a', status: 'valido' as const },
-        { label: 'Próx. do Vencimento', valor: stats.proximos, cor: '#d97706', status: 'proximo' as const },
-        { label: 'Falta / Vencidos', valor: stats.vencidos, cor: '#dc2626', status: 'vencido' as const },
-        { label: 'Programados', valor: stats.programados, cor: '#7c3aed', status: 'programado' as const },
+        { label: 'Colaboradores',        valor: filtrados.length,   cor: '#4a4a49', status: null },
+        { label: 'Treinamentos Válidos', valor: stats.validos,      cor: '#16a34a', status: 'valido'     as const },
+        { label: 'Prazo Crítico',        valor: stats.criticos,     cor: '#d97706', status: 'critico'    as const },
+        { label: 'Bernhoeft c/ Atenção', valor: stats.atencao,      cor: '#ca8a04', status: 'atencao'    as const },
+        { label: 'Falta / Vencidos',     valor: stats.vencidos,     cor: '#dc2626', status: 'vencido'    as const },
+        { label: 'Programados',          valor: stats.programados,  cor: '#7c3aed', status: 'programado' as const },
       ].map((card, i) => {
         const ativo = filtroStatus === card.status && card.status !== null
         return <div key={i} onClick={() => card.status !== null && setFiltroStatus(ativo ? null : card.status)}
