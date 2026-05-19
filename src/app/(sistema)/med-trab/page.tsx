@@ -41,6 +41,7 @@ interface Colaborador {
   nome: string
   situacao: string
   funcao_id: number | null
+  gse: number | null 
   data_admissao: string | null
   processo: string | null
   bases: { nome: string } | null
@@ -136,7 +137,7 @@ function gerarExport(colabs: Colaborador[]) {
       'Admissão': formatarData(c.data_admissao),
       'Função': c.funcoes?.nome || '',
       'Processo': c.processo || '',
-      'GSE': asoPer?.gse ?? '',
+      'GSE': c.gse ?? '',
       'Admissional': formatarData(asoAdm?.data_realizacao),
       'Periódico - Realização': formatarData(asoPer?.data_realizacao),
       'Periódico - Vencimento': formatarData(asoPer?.data_vencimento),
@@ -729,15 +730,7 @@ function ModalNovoASO({ colab, onClose, onSalvo }: {
   const fileRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
-    async function buscarGSE() {
-      if (colab.funcao_id) {
-        const { data } = await supabase.from('gse_funcoes').select('gse_id').eq('gse_id', colab.funcao_id).maybeSingle()
-        if (data?.gse_id) { setGse(String(data.gse_id)); return }
-      }
-      const ultimoComGSE = [...(colab.asos || [])].sort((a, b) => new Date(b.data_realizacao).getTime() - new Date(a.data_realizacao).getTime()).find(a => a.gse != null)
-      if (ultimoComGSE?.gse != null) setGse(String(ultimoComGSE.gse))
-    }
-    buscarGSE()
+    if (colab.gse != null) setGse(String(colab.gse))
   }, [colab])
 
   useEffect(() => {
@@ -898,7 +891,7 @@ export default function MedTrabPage() {
     let todos: any[] = []; let from = 0; const ps = 500
     while (true) {
       let q = supabase.from('colaboradores').select(`
-        matricula, nome, situacao, funcao_id, data_admissao, processo,
+        matricula, nome, situacao, funcao_id, gse, data_admissao, processo,
         bases (nome),
         funcoes (nome),
         gerencias!colaboradores_gerencia_id_fkey (sigla)
@@ -930,21 +923,25 @@ export default function MedTrabPage() {
 const mats = todos.map((c: any) => c.matricula)
 let asosData: any[] = []
 if (mats.length > 0) {
-  let fromA = 0
-  while (true) {
-    const { data: aData } = await supabase
-      .from('asos')
-      .select(`
-        id, matricula_colaborador, tipo, data_realizacao, data_vencimento, gse, observacao, url_arquivo,
-        logs_auditoria(id, auditor_email, data_auditoria, validado, observacao),
-        programacoes_exames(id, data_programada, observacao, criado_por, created_at)
-      `)
-      .in('matricula_colaborador', mats)
-      .range(fromA, fromA + 499)
-    if (!aData || aData.length === 0) break
-    asosData = [...asosData, ...aData]
-    if (aData.length < 500) break
-    fromA += 500
+  const LOTE = 100
+  for (let i = 0; i < mats.length; i += LOTE) {
+    const lote = mats.slice(i, i + LOTE)
+    let fromA = 0
+    while (true) {
+      const { data: aData } = await supabase
+        .from('asos')
+        .select(`
+          id, matricula_colaborador, tipo, data_realizacao, data_vencimento, gse, observacao, url_arquivo,
+          logs_auditoria(id, auditor_email, data_auditoria, validado, observacao),
+          programacoes_exames(id, data_programada, observacao, criado_por, created_at)
+        `)
+        .in('matricula_colaborador', lote)
+        .range(fromA, fromA + 499)
+      if (!aData || aData.length === 0) break
+      asosData = [...asosData, ...aData]
+      if (aData.length < 500) break
+      fromA += 500
+    }
   }
 }
 
@@ -1133,18 +1130,18 @@ if (mats.length > 0) {
             <table style={{ width: '100%', borderCollapse: 'separate', borderSpacing: 0, backgroundColor: 'white', fontSize: fs }}>
               <thead>
                 <tr style={{ backgroundColor: '#fafafa' }}>
-                  {vis('matricula')   && <Th label="Matrícula"  col="matricula"   ord={ordCol} dir={ordDir} onClick={toggleOrd} left={0}       style={{ width: COL_MATRICULA, minWidth: COL_MATRICULA }} />}
-                  {vis('nome')        && <Th label="Nome"       col="nome"        ord={ordCol} dir={ordDir} onClick={toggleOrd} left={leftNome} style={{ width: COL_NOME, minWidth: COL_NOME }} />}
-                  {vis('base')        && <Th label="Base"       col="base"        ord={ordCol} dir={ordDir} onClick={toggleOrd} />}
-                  {vis('situacao')    && <Th label="Situação"   col="situacao"    ord={ordCol} dir={ordDir} onClick={toggleOrd} />}
-                  {vis('admissao')    && <Th label="Admissão"   col="admissao"    ord={ordCol} dir={ordDir} onClick={toggleOrd} />}
-                  {vis('funcao')      && <Th label="Função"     col="funcao"      ord={ordCol} dir={ordDir} onClick={toggleOrd} />}
-                  {vis('processo')    && <Th label="Processo"   col="processo"    ord={ordCol} dir={ordDir} onClick={toggleOrd} />}
-                  {vis('gse')         && <Th label="GSE"        col="gse"         ord={ordCol} dir={ordDir} onClick={toggleOrd} style={{ textAlign: 'center' }} />}
+                  {vis('matricula')   && <Th label="Matrícula"  col="matricula"    ord={ordCol} dir={ordDir} onClick={toggleOrd} left={0}       style={{ width: COL_MATRICULA, minWidth: COL_MATRICULA }} />}
+                  {vis('nome')        && <Th label="Nome"       col="nome"         ord={ordCol} dir={ordDir} onClick={toggleOrd} left={leftNome} style={{ width: COL_NOME, minWidth: COL_NOME }} />}
+                  {vis('base')        && <Th label="Base"       col="base"         ord={ordCol} dir={ordDir} onClick={toggleOrd} />}
+                  {vis('situacao')    && <Th label="Situação"   col="situacao"     ord={ordCol} dir={ordDir} onClick={toggleOrd} />}
+                  {vis('admissao')    && <Th label="Admissão"   col="admissao"     ord={ordCol} dir={ordDir} onClick={toggleOrd} />}
+                  {vis('funcao')      && <Th label="Função"     col="funcao"       ord={ordCol} dir={ordDir} onClick={toggleOrd} />}
+                  {vis('processo')    && <Th label="Processo"   col="processo"     ord={ordCol} dir={ordDir} onClick={toggleOrd} />}
+                  {vis('gse')         && <Th label="GSE"        col="gse"          ord={ordCol} dir={ordDir} onClick={toggleOrd} style={{ textAlign: 'center' }} />}
                   {vis('admissional') && <Th label="Admissional" col="admissional" ord={ordCol} dir={ordDir} onClick={toggleOrd} style={{ textAlign: 'center' }} />}
-                  {vis('periodico')   && <Th label="Periódico"  col="periodico"   ord={ordCol} dir={ordDir} onClick={toggleOrd} style={{ textAlign: 'center' }} />}
-                  {vis('retorno')     && <Th label="Retorno"    col="retorno"     ord={ordCol} dir={ordDir} onClick={toggleOrd} style={{ textAlign: 'center' }} />}
-                  {vis('mro')         && <Th label="MRO"        col="mro"         ord={ordCol} dir={ordDir} onClick={toggleOrd} style={{ textAlign: 'center' }} />}
+                  {vis('periodico')   && <Th label="Periódico"  col="periodico"    ord={ordCol} dir={ordDir} onClick={toggleOrd} style={{ textAlign: 'center' }} />}
+                  {vis('retorno')     && <Th label="Retorno"    col="retorno"      ord={ordCol} dir={ordDir} onClick={toggleOrd} style={{ textAlign: 'center' }} />}
+                  {vis('mro')         && <Th label="MRO"        col="mro"          ord={ordCol} dir={ordDir} onClick={toggleOrd} style={{ textAlign: 'center' }} />}
                   {vis('demissional') && <Th label="Demissional" col="demissional" ord={ordCol} dir={ordDir} onClick={toggleOrd} style={{ textAlign: 'center' }} />}
                 </tr>
               </thead>
@@ -1187,7 +1184,7 @@ if (mats.length > 0) {
                           {vis('admissao')  && <td style={tdBase()}>{formatarData(c.data_admissao)}</td>}
 {vis('funcao')    && <td style={tdBase()}>{c.funcoes?.nome || '—'}</td>}
 {vis('processo')  && <td style={tdBase()}>{c.processo || '—'}</td>}
-{vis('gse')       && <td style={tdBase({ textAlign: 'center' })}>{asoPer?.gse ?? '—'}</td>}
+{vis('gse') && <td style={tdBase({ textAlign: 'center' })}>{c.gse ?? '—'}</td>}
 {vis('admissional') && <CelulaASO aso={asoAdm} tipo="admissional" compacto={compacto}
   onClick={() => setModalASO({ colab: c, aso: asoAdm, tipo: 'admissional', abaInicial: 'info' })}
   onCalendario={() => setModalASO({ colab: c, aso: asoAdm, tipo: 'admissional', abaInicial: 'programacao' })} />}

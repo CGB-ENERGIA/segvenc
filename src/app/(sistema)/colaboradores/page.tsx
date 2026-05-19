@@ -10,6 +10,7 @@ interface Colaborador {
   nome: string
   funcoes: { nome: string } | null
   funcao_id: number | null
+  gse: number | null
   base_id: number | null
   gerencia_id: number | null
   contato: string | null
@@ -72,6 +73,7 @@ export default function ColaboradoresPage() {
   const [funcoes, setFuncoes] = useState<Funcao[]>([])
   const [gerencias, setGerencias] = useState<Gerencia[]>([])
   const [supervisores, setSupervisores] = useState<Supervisor[]>([])
+  const [gsesDaFuncao, setGsesDaFuncao] = useState<{ id: number; setor: string }[]>([])
   const [carregando, setCarregando] = useState(true)
   const [filtroBase, setFiltroBase] = useState('')
   const [filtroFuncao, setFiltroFuncao] = useState('')
@@ -95,10 +97,10 @@ export default function ColaboradoresPage() {
   const [erro, setErro] = useState<string | null>(null)
   const [ordemColuna, setOrdemColuna] = useState<OrdemColuna>('nome')
   const [ordemDirecao, setOrdemDirecao] = useState<OrdemDirecao>('asc')
-const [form, setForm] = useState({
+  const [form, setForm] = useState({
   matricula: '', nome: '', funcao_id: '', base_id: '',
   gerencia: '', contato: '', processo: '', supervisor: '',
-  data_admissao: '', data_demissao: '', email_corporativo: '', situacao: 'ATIVO',
+  data_admissao: '', data_demissao: '', email_corporativo: '', situacao: 'ATIVO', gse: '',
 })
   const [editando, setEditando] = useState<string | null>(null)
   const [modalExcluirAberto, setModalExcluirAberto] = useState(false)
@@ -128,6 +130,22 @@ async function buscarStats() {
   setCarregandoStats(false)
 }
 
+  // ─── BUSCA GSE ─────────────────────────────────────────────────────────
+
+async function buscarGsesDaFuncao(funcaoId: string) {
+  if (!funcaoId) { setGsesDaFuncao([]); return }
+  const funcao = funcoes.find(f => f.id === parseInt(funcaoId))
+  if (!funcao) { setGsesDaFuncao([]); return }
+  const { data } = await supabase
+    .from('gse_funcoes')
+    .select('gse_id, gses(id, setor)')
+    .eq('funcao', funcao.nome)
+  const lista = (data || []).map((g: any) => ({ id: g.gse_id, setor: g.gses?.setor || '' }))
+  setGsesDaFuncao(lista)
+  if (lista.length === 1) setForm(f => ({ ...f, gse: String(lista[0].id) }))
+  else setForm(f => ({ ...f, gse: '' }))
+}
+
   // ─── BUSCA TABELA ─────────────────────────────────────────────────────────
 
   async function buscar(base: string, funcao: string, situacao: string, pag: number = 1, busca: string = '') {
@@ -138,7 +156,7 @@ async function buscarStats() {
     let q = supabase
       .from('colaboradores')
       .select(
-       'matricula, nome, funcao_id, base_id, gerencia_id, contato, processo, data_admissao, data_demissao, email_corporativo, situacao, gerencia, supervisor, bases(nome), funcoes(nome)',
+       'matricula, nome, funcao_id, gse, base_id, gerencia_id, contato, processo, data_admissao, data_demissao, email_corporativo, situacao, gerencia, supervisor, bases(nome), funcoes(nome)',
        { count: 'exact' }
     )
       .order('nome')
@@ -207,16 +225,17 @@ setSupervisores((s as unknown as Supervisor[]) || [])
     return ordemDirecao === 'asc' ? vA.localeCompare(vB) : vB.localeCompare(vA)
   })
 
-  function abrirNovo() {
-    setEditando(null)
-    setForm({
-      matricula: '', nome: '', funcao_id: '', base_id: '',
-      gerencia: '', supervisor: '', contato: '', processo: '',
-      data_admissao: '', data_demissao: '', email_corporativo: '', situacao: 'ATIVO',
-    })
-    setErro(null)
-    setModalAberto(true)
-  }
+function abrirNovo() {
+  setEditando(null)
+  setForm({
+    matricula: '', nome: '', funcao_id: '', base_id: '',
+    gerencia: '', supervisor: '', contato: '', processo: '',
+    data_admissao: '', data_demissao: '', email_corporativo: '', situacao: 'ATIVO', gse: '',
+  })
+  setGsesDaFuncao([])
+  setErro(null)
+  setModalAberto(true)
+}
 
   function abrirEdicao(c: Colaborador) {
     setEditando(c.matricula)
@@ -231,8 +250,9 @@ setSupervisores((s as unknown as Supervisor[]) || [])
       data_admissao: c.data_admissao || '',
       data_demissao: c.data_demissao || '',
       email_corporativo: c.email_corporativo || '',
-      situacao: c.situacao,
-    })
+      situacao: c.situacao,  gse: c.gse?.toString() || '',
+  })
+  if (c.funcao_id) buscarGsesDaFuncao(c.funcao_id.toString())
     setErro(null)
     setModalAberto(true)
   }
@@ -252,6 +272,7 @@ setSupervisores((s as unknown as Supervisor[]) || [])
       data_demissao: form.data_demissao || null,
       email_corporativo: form.email_corporativo || null,
       situacao: form.situacao,
+      gse: form.gse ? parseInt(form.gse) : null,
     }
     if (editando) {
       const { error } = await supabase.from('colaboradores').update(payload).eq('matricula', editando)
@@ -402,6 +423,7 @@ setSupervisores((s as unknown as Supervisor[]) || [])
                   <ThOrdenavel label="Matrícula" coluna="matricula" ordemAtual={ordemColuna} direcao={ordemDirecao} onClick={toggleOrdem} />
                   <ThOrdenavel label="Função" coluna="funcao" ordemAtual={ordemColuna} direcao={ordemDirecao} onClick={toggleOrdem} />
                   <ThOrdenavel label="Processo" coluna="processo" ordemAtual={ordemColuna} direcao={ordemDirecao} onClick={toggleOrdem} />
+                  <th style={{ padding: '10px 16px', textAlign: 'center', fontWeight: 700, color: '#333', whiteSpace: 'nowrap', position: 'sticky', top: 0, backgroundColor: '#fafafa', zIndex: 3 }}>GSE</th>
                   <ThOrdenavel label="Base" coluna="base" ordemAtual={ordemColuna} direcao={ordemDirecao} onClick={toggleOrdem} />
                   <ThOrdenavel label="Gerência" coluna="gerencia" ordemAtual={ordemColuna} direcao={ordemDirecao} onClick={toggleOrdem} />
                   <ThOrdenavel label="Supervisor" coluna="supervisor" ordemAtual={ordemColuna} direcao={ordemDirecao} onClick={toggleOrdem} />
@@ -428,6 +450,7 @@ setSupervisores((s as unknown as Supervisor[]) || [])
                       <td style={{ padding: '10px 16px', color: '#666' }}>{c.matricula}</td>
                       <td style={{ padding: '10px 16px', color: '#666', whiteSpace: 'nowrap' }}>{c.funcoes?.nome || '—'}</td>
                       <td style={{ padding: '10px 16px', color: '#666', whiteSpace: 'nowrap' }}>{c.processo || '—'}</td>
+                      <td style={{ padding: '10px 16px', color: '#666', textAlign: 'center' }}>{c.gse ?? '—'}</td>
                       <td style={{ padding: '10px 16px', color: '#666', whiteSpace: 'nowrap' }}>{c.bases?.nome || '—'}</td>
                       <td style={{ padding: '10px 16px', color: '#666', whiteSpace: 'nowrap' }}>
                        {c.gerencia
@@ -534,7 +557,7 @@ setSupervisores((s as unknown as Supervisor[]) || [])
               </div>
               <div>
                 <label style={labelStyle}>Função</label>
-                <select value={form.funcao_id} onChange={e => setForm({ ...form, funcao_id: e.target.value })} style={inputStyle}>
+                <select value={form.funcao_id} onChange={e => { setForm({ ...form, funcao_id: e.target.value }); buscarGsesDaFuncao(e.target.value) }} style={inputStyle}>
                   <option value="">Selecione...</option>
                   {funcoes.map(f => <option key={f.id} value={f.id}>{f.nome}</option>)}
                 </select>
@@ -561,29 +584,48 @@ setSupervisores((s as unknown as Supervisor[]) || [])
   </select>
                 </div>
               <div>
-                <label style={labelStyle}>Contato (telefone)</label>
-                <input value={form.contato} onChange={e => setForm({ ...form, contato: e.target.value })} style={inputStyle} placeholder="(69) 99999-9999" />
-              </div>
-              <div>
-              <div>
-               <label style={labelStyle}>Processo</label>
-               <select value={form.processo} onChange={e => setForm({ ...form, processo: e.target.value })} style={inputStyle}>
-               <option value="">Selecione...</option>
-                 {[
-                    'Administrativo', 'Almoxarifado', 'Construção', 'Corte e Religação',
-                    'Frota', 'Inspeção', 'Ligação Nova', 'Linha Viva', 'Manutenção',
-                    'Plantão', 'Poda', 'Qualidade e Equipamentos', 'Seed Money',
-                    'Segurança', 'Tat', 'Transporte'
-                   ].map(p => <option key={p} value={p}>{p}</option>)}
-                 </select>
-              </div>
-                <label style={labelStyle}>Data de Admissão</label>
-                <input type="date" value={form.data_admissao} onChange={e => setForm({ ...form, data_admissao: e.target.value })} style={inputStyle} />
-              </div>
-              <div>
-                <label style={labelStyle}>Data de Demissão</label>
-                <input type="date" value={form.data_demissao} onChange={e => setForm({ ...form, data_demissao: e.target.value })} style={inputStyle} />
-              </div>
+  <label style={labelStyle}>Contato (telefone)</label>
+  <input value={form.contato} onChange={e => setForm({ ...form, contato: e.target.value })} style={inputStyle} placeholder="(69) 99999-9999" />
+</div>
+<div>
+  <label style={labelStyle}>Processo</label>
+  <select value={form.processo} onChange={e => setForm({ ...form, processo: e.target.value })} style={inputStyle}>
+    <option value="">Selecione...</option>
+    {['Administrativo','Almoxarifado','Construção','Corte e Religação','Frota','Inspeção','Ligação Nova','Linha Viva','Manutenção','Plantão','Poda','Qualidade e Equipamentos','Seed Money','Segurança','Tat','Transporte'].map(p => <option key={p} value={p}>{p}</option>)}
+  </select>
+</div>
+
+{/* GSE */}
+<div style={{ gridColumn: '1 / -1' }}>
+  <label style={labelStyle}>GSE</label>
+  {gsesDaFuncao.length === 0 && (
+    <input value={form.gse} onChange={e => setForm({ ...form, gse: e.target.value })} style={inputStyle} placeholder="Selecione uma função primeiro" disabled />
+  )}
+  {gsesDaFuncao.length === 1 && (
+    <input value={`${gsesDaFuncao[0].id} — ${gsesDaFuncao[0].setor}`} style={{ ...inputStyle, backgroundColor: '#f0fdf4', color: '#16a34a' }} disabled />
+  )}
+  {gsesDaFuncao.length > 1 && (
+    <select value={form.gse} onChange={e => setForm({ ...form, gse: e.target.value })} style={inputStyle}>
+      <option value="">Selecione o GSE...</option>
+      {gsesDaFuncao.map(g => <option key={g.id} value={g.id}>{g.id} — {g.setor}</option>)}
+    </select>
+  )}
+</div>
+
+{/* Datas na mesma linha */}
+<div>
+  <label style={labelStyle}>Data de Admissão</label>
+  <input type="date" value={form.data_admissao} onChange={e => setForm({ ...form, data_admissao: e.target.value })} style={inputStyle} />
+</div>
+<div>
+  <label style={labelStyle}>Data de Demissão</label>
+  <input type="date" value={form.data_demissao} onChange={e => setForm({ ...form, data_demissao: e.target.value })} style={inputStyle} />
+</div>
+
+<div style={{ gridColumn: '1 / -1' }}>
+  <label style={labelStyle}>E-mail corporativo</label>
+  <input type="email" value={form.email_corporativo} onChange={e => setForm({ ...form, email_corporativo: e.target.value })} style={inputStyle} placeholder="email@cgbengenharia.com.br" />
+</div>
               <div style={{ gridColumn: '1 / -1' }}>
                 <label style={labelStyle}>E-mail corporativo</label>
                 <input type="email" value={form.email_corporativo} onChange={e => setForm({ ...form, email_corporativo: e.target.value })} style={inputStyle} placeholder="email@cgbengenharia.com.br" />
