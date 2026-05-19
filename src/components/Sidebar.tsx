@@ -10,7 +10,7 @@ import {
   LayoutDashboard, LayoutGrid, HeartPulse, Users, 
   ClipboardCheck, Settings, ChevronLeft, ChevronRight, 
   ChevronDown, MoreHorizontal, User, Key, LogOut, X, 
-  CheckCircle2, Circle
+  CheckCircle2, Circle, CreditCard
 } from 'lucide-react'
 
 // ─── CORES E ESTILOS GERAIS ──────────────────────────────────────────────────
@@ -26,6 +26,7 @@ const MAPA_ICONES: Record<string, React.ElementType> = {
   '/auditoria': ClipboardCheck,
   '/matriz-competencias': LayoutGrid,
   '/med-trab': HeartPulse,
+  '/cnh': CreditCard,
   '/configuracoes': Settings,
 }
 
@@ -289,6 +290,7 @@ export default function Sidebar() {
       ],
     },
     { label: 'Medicina do Trabalho',   href: '/med-trab',             niveis: [] as string[],                        modulo: 'medicina' },
+    { label: 'CNH',                    href: '/cnh',                  niveis: ['admin', 'operador'],                 modulo: null },
     { label: 'Colaboradores',          href: '/colaboradores',        niveis: ['admin', 'operador'],                 modulo: null },
     { label: 'Auditoria',              href: '/auditoria',            niveis: ['admin', 'operador'],                 modulo: null },
     { label: 'Configurações',          href: '/configuracoes',        niveis: ['admin'],                             modulo: null },
