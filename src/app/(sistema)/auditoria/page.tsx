@@ -1,213 +1,248 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useRef, useMemo, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/lib/auth-context'
 
-// ─── TIPOS ───────────────────────────────────────────────────────────────────
-
-interface Auditoria {
-  id: string
-  auditor_email: string
-  data_auditoria: string
-  validado: boolean
-  observacao: string | null
-}
-
-interface Registro {
-  id: string
-  matricula_colaborador: string
-  regra_id: number
-  data_realizacao: string
-  data_vencimento: string
-  url_arquivo: string | null
-  logs_auditoria: Auditoria[]
-  colaboradores: {
-    nome: string
-    funcoes: { nome: string } | null
-    bases: { id: number; nome: string } | null
-  } | null
-  regras_vencimento: {
-    nome_item: string
-  } | null
-}
-
-type OrdemColuna = 'matricula' | 'colaborador' | 'funcao' | 'base' | 'treinamento' | 'realizado' | 'vencimento' | 'status'
-type OrdemDirecao = 'asc' | 'desc'
-type FiltroCard = 'pendente' | 'reprovado' | 'validado' | 'sem_arquivo' | null
-
+// ─── CONSTANTES ───────────────────────────────────────────────────────────────
 const COR = '#9f183c'
-const PAGE_SIZE = 50
+const COL_MATRICULA = 110
+const COL_NOME = 230
+const SITUACOES_EXCLUIDAS_PADRAO = ['DEMITIDO', 'AF.PREVIDÊNCIA', 'LICENÇA MATERNIDADE']
 
-// ─── HELPERS ─────────────────────────────────────────────────────────────────
+const REGRAS_NR_PO = [
+  { id: 5,  nome: 'NR 10-B',           grupo: 'NR' },
+  { id: 6,  nome: 'NR 11',             grupo: 'NR' },
+  { id: 13, nome: 'NR 12 - II',        grupo: 'NR' },
+  { id: 14, nome: 'NR 12 - V',         grupo: 'NR' },
+  { id: 15, nome: 'NR 12 - XII',       grupo: 'NR' },
+  { id: 8,  nome: 'NR 35',             grupo: 'NR' },
+  { id: 1,  nome: 'Direção Defensiva', grupo: 'PO' },
+  { id: 2,  nome: 'Pilotagem Defensiva', grupo: 'PO' },
+]
 
-function getStatusVencimento(dataVencimento: string) {
-  const hoje = new Date()
-  const venc = new Date(dataVencimento)
-  const diff = (venc.getTime() - hoje.getTime()) / (1000 * 60 * 60 * 24)
-  if (diff < 0) return 'vencido'
-  if (diff <= 30) return 'proximo'
-  return 'valido'
+const TIPOS_ASO = [
+  { value: 'admissional',   label: 'Admissional', sigla: 'ADM' },
+  { value: 'periodico',     label: 'Periódico',   sigla: 'PER' },
+  { value: 'retorno',       label: 'Retorno',     sigla: 'RET' },
+  { value: 'mudanca_risco', label: 'MRO',         sigla: 'MRO' },
+]
+
+// ─── TIPOS ────────────────────────────────────────────────────────────────────
+interface LogAuditoria {
+  id: string; auditor_email: string; data_auditoria: string
+  validado: boolean; observacao: string | null
 }
 
-function getStatusAuditoria(registro: Registro): { label: string; cor: string; bg: string; key: string } {
-  const auditorias = registro.logs_auditoria || []
-  if (auditorias.length === 0) return { label: 'Pendente', cor: '#888', bg: '#f5f5f5', key: 'pendente' }
-  const ultima = [...auditorias].sort((a, b) =>
-    new Date(b.data_auditoria).getTime() - new Date(a.data_auditoria).getTime()
-  )[0]
-  if (ultima.validado) return { label: 'Validado', cor: '#16a34a', bg: '#f0fdf4', key: 'validado' }
-  return { label: 'Reprovado', cor: '#dc2626', bg: '#fef2f2', key: 'reprovado' }
+interface RegistroNRPO {
+  id: string; matricula_colaborador: string; regra_id: number
+  data_realizacao: string; data_vencimento: string
+  url_arquivo: string | null; logs_auditoria: LogAuditoria[]
+  nome_colaborador: string; funcao: string | null
+  base: string | null; base_id: number | null; situacao: string
+  nome_item: string
 }
 
-// ─── TH ORDENÁVEL ────────────────────────────────────────────────────────────
+interface RegistroASO {
+  id: string; matricula_colaborador: string; tipo: string
+  data_realizacao: string; data_vencimento: string | null
+  url_arquivo: string | null; logs_auditoria: LogAuditoria[]
+  nome_colaborador: string; funcao: string | null
+  base: string | null; base_id: number | null; situacao: string
+}
 
-function ThOrdenavel({ label, coluna, ordemAtual, direcao, onClick, style }: {
-  label: string
-  coluna: OrdemColuna
-  ordemAtual: OrdemColuna
-  direcao: OrdemDirecao
-  onClick: (col: OrdemColuna) => void
-  style?: React.CSSProperties
-}) {
-  const ativo = ordemAtual === coluna
+interface Base { id: number; nome: string }
+type AbaAtiva = 'nrpo' | 'aso'
+type StatusAud = 'aprovado' | 'reprovado' | 'pendente'
+type CardFiltro = StatusAud | null
+type OrdemDirecao = 'asc' | 'desc'
+
+// ─── HELPERS ──────────────────────────────────────────────────────────────────
+function formatarData(d: string | null | undefined): string {
+  if (!d) return '—'
+  return new Date(d + 'T12:00:00').toLocaleDateString('pt-BR')
+}
+function calcularDias(dv: string | null): number | null {
+  if (!dv) return null
+  return Math.ceil((new Date(dv + 'T12:00:00').getTime() - new Date().getTime()) / 86400000)
+}
+function getStatusAuditoria(logs: LogAuditoria[]): StatusAud {
+  if (!logs || logs.length === 0) return 'pendente'
+  const ultima = [...logs].sort((a, b) => new Date(b.data_auditoria).getTime() - new Date(a.data_auditoria).getTime())[0]
+  return ultima.validado ? 'aprovado' : 'reprovado'
+}
+function statusAudCores(s: StatusAud): { bg: string; text: string } {
+  if (s === 'aprovado')  return { bg: '#f0fdf4', text: '#16a34a' }
+  if (s === 'reprovado') return { bg: '#fef2f2', text: '#dc2626' }
+  return { bg: '#f5f5f5', text: '#888' }
+}
+function statusVencCores(dias: number | null): { bg: string; text: string } {
+  if (dias === null) return { bg: 'transparent', text: '#666' }
+  if (dias < 0)    return { bg: '#fef2f2', text: '#dc2626' }
+  if (dias <= 30)  return { bg: '#fff7ed', text: '#c2410c' }
+  if (dias <= 60)  return { bg: '#fefce8', text: '#a16207' }
+  return { bg: '#f0fdf4', text: '#15803d' }
+}
+
+// ─── EXPORTAÇÃO ───────────────────────────────────────────────────────────────
+function exportCSV(dados: Record<string, string | number>[]) {
+  if (!dados.length) return
+  const cols = Object.keys(dados[0])
+  const csv = [cols.map(h => `"${h}"`).join(';'), ...dados.map(r => cols.map(h => `"${String(r[h] ?? '').replace(/"/g, '""')}"`).join(';'))].join('\n')
+  const a = document.createElement('a')
+  a.href = URL.createObjectURL(new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8;' }))
+  a.download = `auditoria-${new Date().toLocaleDateString('pt-BR').replace(/\//g, '-')}.csv`
+  a.click()
+}
+function exportXLSX(dados: Record<string, string | number>[]) {
+  if (!dados.length) return
+  import('xlsx').then(X => {
+    const ws = X.utils.json_to_sheet(dados)
+    const wb = X.utils.book_new()
+    X.utils.book_append_sheet(wb, ws, 'Auditoria')
+    X.writeFile(wb, `auditoria-${new Date().toLocaleDateString('pt-BR').replace(/\//g, '-')}.xlsx`)
+  })
+}
+
+// ─── FILTRO MULTI-SELECT SITUAÇÃO ─────────────────────────────────────────────
+function FiltroSituacao({ opcoes, selecionadas, onChange }: { opcoes: string[]; selecionadas: string[]; onChange: (v: string[]) => void }) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const h = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false) }
+    document.addEventListener('mousedown', h); return () => document.removeEventListener('mousedown', h)
+  }, [])
+  const toggle = (s: string) => onChange(selecionadas.includes(s) ? selecionadas.filter(x => x !== s) : [...selecionadas, s])
+  const todas = opcoes.every(o => selecionadas.includes(o))
+  let label = 'Todas as situações'
+  if (selecionadas.length === 0) label = 'Nenhuma'
+  else if (!todas) label = selecionadas.length === 1 ? selecionadas[0] : `${selecionadas.length} situações`
   return (
-    <th
-      onClick={() => onClick(coluna)}
-      style={{
-        padding: '10px 16px', textAlign: 'left', fontWeight: 700,
-        color: ativo ? COR : '#333', whiteSpace: 'nowrap',
-        cursor: 'pointer', userSelect: 'none',
-        borderBottom: ativo ? `2px solid ${COR}` : '2px solid transparent',
-        position: 'sticky', top: 0, backgroundColor: '#fafafa', zIndex: 3,
-        ...style,
-      }}
-    >
-      {label} {ativo ? (direcao === 'asc' ? '↑' : '↓') : <span style={{ color: '#ccc' }}>↕</span>}
+    <div ref={ref} style={{ position: 'relative' }}>
+      <button onClick={() => setOpen(!open)} style={{ height: 36, border: '1px solid #e0e0e0', borderRadius: 8, padding: '0 10px', fontSize: 13, backgroundColor: 'white', color: '#555', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, minWidth: 160, justifyContent: 'space-between' }}>
+        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</span>
+        <span style={{ fontSize: 10, flexShrink: 0 }}>{open ? '▲' : '▼'}</span>
+      </button>
+      {open && (
+        <div style={{ position: 'absolute', top: 40, left: 0, zIndex: 150, backgroundColor: 'white', border: '1px solid #e0e0e0', borderRadius: 10, boxShadow: '0 8px 24px rgba(0,0,0,0.12)', width: 220, overflow: 'hidden' }}>
+          <div style={{ padding: '8px 14px', borderBottom: '1px solid #f0f0f0' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, fontWeight: 600, color: '#333', cursor: 'pointer' }}>
+              <input type="checkbox" checked={todas} onChange={() => onChange(todas ? [] : opcoes)} style={{ accentColor: COR }} />Todas as situações
+            </label>
+          </div>
+          {opcoes.map(op => (
+            <label key={op} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 14px', fontSize: 12, cursor: 'pointer', backgroundColor: selecionadas.includes(op) ? '#fdf2f5' : 'white', color: selecionadas.includes(op) ? COR : '#555' }}>
+              <input type="checkbox" checked={selecionadas.includes(op)} onChange={() => toggle(op)} style={{ accentColor: COR }} />{op}
+            </label>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ─── BOTÃO EXPORTAR ───────────────────────────────────────────────────────────
+function BotaoExportar({ onClick }: { onClick: (t: 'csv' | 'xlsx') => void }) {
+  const [open, setOpen] = useState(false); const ref = useRef<HTMLDivElement>(null)
+  useEffect(() => { const h = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false) }; document.addEventListener('mousedown', h); return () => document.removeEventListener('mousedown', h) }, [])
+  return (
+    <div ref={ref} style={{ position: 'relative' }}>
+      <button onClick={() => setOpen(!open)} style={{ height: 36, padding: '0 10px', fontSize: 12, border: '1px solid #e0e0e0', borderRadius: 8, backgroundColor: 'white', color: '#555', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4 }}>
+        <svg width={18} height={18} viewBox="0 0 24 24" fill="none" stroke="#16a34a" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8zM14 2v6h6M8 13h2m4 0h2M8 17h2m4 0h2M10 13v4" /></svg>
+        <span style={{ fontSize: 10 }}>{open ? '▲' : '▼'}</span>
+      </button>
+      {open && <div style={{ position: 'absolute', top: 40, right: 0, zIndex: 150, backgroundColor: 'white', border: '1px solid #e0e0e0', borderRadius: 10, boxShadow: '0 8px 24px rgba(0,0,0,0.12)', width: 180, overflow: 'hidden' }}>
+        {(['csv', 'xlsx'] as const).map((t, i) => (
+          <button key={t} onClick={() => { onClick(t); setOpen(false) }} style={{ width: '100%', padding: '10px 16px', fontSize: 13, textAlign: 'left', border: 'none', background: 'none', cursor: 'pointer', color: '#333', display: 'flex', alignItems: 'center', gap: 10, borderTop: i > 0 ? '1px solid #f0f0f0' : 'none' }}
+            onMouseEnter={e => e.currentTarget.style.backgroundColor = '#f9f9f9'}
+            onMouseLeave={e => e.currentTarget.style.backgroundColor = 'transparent'}>
+            {t === 'csv' ? '📄 Exportar CSV' : '📊 Exportar Excel'}
+          </button>
+        ))}
+      </div>}
+    </div>
+  )
+}
+
+// ─── TH ORDENÁVEL ─────────────────────────────────────────────────────────────
+function Th({ label, col, ord, dir, onClick, left, style }: {
+  label: string; col: string; ord: string; dir: OrdemDirecao
+  onClick: (c: string) => void; left?: number; style?: React.CSSProperties
+}) {
+  const ativo = ord === col; const isSticky = left !== undefined
+  return (
+    <th onClick={() => onClick(col)} style={{
+      padding: '10px 12px', textAlign: 'left', fontWeight: 700, whiteSpace: 'nowrap',
+      cursor: 'pointer', userSelect: 'none', color: ativo ? COR : '#333',
+      borderBottom: ativo ? `2px solid ${COR}` : '2px solid #e0e0e0',
+      borderRight: isSticky ? '2px solid #d0d0d0' : '1px solid #e8e8e8',
+      position: 'sticky', top: 0, left: isSticky ? left : undefined,
+      zIndex: isSticky ? 110 : 100, backgroundColor: '#fafafa', ...style,
+    }}>
+      {label} {ativo ? (dir === 'asc' ? '↑' : '↓') : <span style={{ color: '#ccc' }}>↕</span>}
     </th>
   )
 }
 
 // ─── MODAL AUDITORIA ─────────────────────────────────────────────────────────
-
-function ModalAuditoria({ registro, usuarioEmail, onFechar, onAtualizar }: {
-  registro: Registro
-  usuarioEmail: string
-  onFechar: () => void
-  onAtualizar: () => void
+function ModalAuditoria({ titulo, subtitulo, logs, urlArquivo, onClose, onSalvar, podeAuditar }: {
+  titulo: string; subtitulo: string; logs: LogAuditoria[]
+  urlArquivo: string | null; onClose: () => void
+  onSalvar: (validado: boolean, obs: string) => Promise<void>; podeAuditar: boolean
 }) {
   const [form, setForm] = useState({ validado: true, observacao: '' })
-  const [salvando, setSalvando] = useState(false)
-  const [erro, setErro] = useState<string | null>(null)
-
-  const auditorias = [...(registro.logs_auditoria || [])].sort(
-    (a, b) => new Date(b.data_auditoria).getTime() - new Date(a.data_auditoria).getTime()
-  )
-
-  const inputStyle: React.CSSProperties = {
-    width: '100%', height: 38, border: '1px solid #e0e0e0',
-    borderRadius: 8, padding: '0 12px', fontSize: 13,
-    color: '#333', outline: 'none', boxSizing: 'border-box',
-  }
+  const [salvando, setSalvando] = useState(false); const [erro, setErro] = useState('')
+  const auditorias = [...logs].sort((a, b) => new Date(b.data_auditoria).getTime() - new Date(a.data_auditoria).getTime())
+  const inp: React.CSSProperties = { width: '100%', height: 38, border: '1px solid #e0e0e0', borderRadius: 8, padding: '0 12px', fontSize: 13, boxSizing: 'border-box', outline: 'none' }
 
   async function salvar() {
     if (!form.validado && !form.observacao) { setErro('Informe o motivo da reprovação.'); return }
-    setSalvando(true); setErro(null)
-    const { error } = await supabase.from('logs_auditoria').insert({
-      registro_id: registro.id,
-      auditor_email: usuarioEmail,
-      validado: form.validado,
-      observacao: form.observacao || null,
-      data_auditoria: new Date().toISOString(),
-    })
-    if (error) { setErro('Erro ao salvar: ' + error.message); setSalvando(false); return }
+    setSalvando(true); setErro('')
+    await onSalvar(form.validado, form.observacao)
     setSalvando(false)
-    onAtualizar()
-    onFechar()
   }
 
   return (
-    <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100 }}>
+    <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 300 }}>
       <div style={{ backgroundColor: 'white', borderRadius: 16, width: '100%', maxWidth: 560, maxHeight: '88vh', display: 'flex', flexDirection: 'column', boxShadow: '0 20px 60px rgba(0,0,0,0.2)' }}>
-
-        {/* HEADER */}
         <div style={{ padding: '24px 28px 20px', borderBottom: '1px solid #f0f0f0' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
             <div>
               <h2 style={{ fontSize: 17, fontWeight: 600, margin: 0, color: '#1a1a1a' }}>Auditar Documento</h2>
-              <p style={{ fontSize: 13, color: '#888', margin: '4px 0 0' }}>
-                {registro.colaboradores?.nome} · {registro.matricula_colaborador} — {registro.regras_vencimento?.nome_item}
-              </p>
+              <p style={{ fontSize: 13, color: '#888', margin: '4px 0 0' }}>{titulo} — {subtitulo}</p>
             </div>
-            <button onClick={onFechar} style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: '#aaa', padding: '0 4px' }}>✕</button>
+            <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: '#aaa' }}>✕</button>
           </div>
         </div>
+        <div style={{ padding: '20px 28px', overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: 16 }}>
+          {urlArquivo
+            ? <a href={urlArquivo} target="_blank" rel="noreferrer" style={{ display: 'flex', alignItems: 'center', gap: 10, padding: 14, backgroundColor: '#eff6ff', borderRadius: 10, border: '1px solid #bfdbfe', color: '#2563eb', textDecoration: 'none', fontSize: 13, fontWeight: 500 }}>👁 Visualizar documento antes de auditar</a>
+            : <div style={{ padding: 14, backgroundColor: '#fef2f2', borderRadius: 10, border: '1px solid #fecaca' }}><p style={{ fontSize: 13, color: '#b91c1c', margin: 0 }}>⚠️ Sem documento.</p></div>}
 
-        <div style={{ padding: '20px 28px', overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: 20 }}>
-
-          {/* DOCUMENTO */}
-          {registro.url_arquivo ? (
-            <a href={registro.url_arquivo} target="_blank" rel="noreferrer"
-              style={{ display: 'flex', alignItems: 'center', gap: 10, padding: 14, backgroundColor: '#eff6ff', borderRadius: 10, border: '1px solid #bfdbfe', color: '#2563eb', textDecoration: 'none', fontSize: 13, fontWeight: 500 }}>
-              👁 Visualizar documento antes de auditar
-            </a>
-          ) : (
-            <div style={{ padding: 14, backgroundColor: '#fef2f2', borderRadius: 10, border: '1px solid #fecaca' }}>
-              <p style={{ fontSize: 13, color: '#b91c1c', margin: 0 }}>⚠️ Sem documento. Recomenda-se solicitar antes de auditar.</p>
+          {podeAuditar && <>
+            <div>
+              <label style={{ display: 'block', fontSize: 12, color: '#666', marginBottom: 8, fontWeight: 600 }}>Decisão *</label>
+              <div style={{ display: 'flex', gap: 12 }}>
+                {[{ val: true, label: 'Aprovar', cor: '#16a34a', bg: '#f0fdf4' }, { val: false, label: 'Reprovar', cor: '#dc2626', bg: '#fef2f2' }].map(op => (
+                  <button key={String(op.val)} onClick={() => setForm(f => ({ ...f, validado: op.val }))} style={{ flex: 1, height: 42, borderRadius: 8, fontSize: 13, fontWeight: 500, cursor: 'pointer', border: form.validado === op.val ? `2px solid ${op.cor}` : '1px solid #e0e0e0', backgroundColor: form.validado === op.val ? op.bg : 'white', color: form.validado === op.val ? op.cor : '#555' }}>{op.label}</button>
+                ))}
+              </div>
             </div>
-          )}
-
-          {/* DECISÃO */}
-          <div>
-            <label style={{ display: 'block', fontSize: 12, color: '#666', marginBottom: 8, fontWeight: 600 }}>Decisão *</label>
-            <div style={{ display: 'flex', gap: 12 }}>
-              {[
-                { val: true, label: 'Aprovar', cor: '#16a34a', bg: '#f0fdf4' },
-                { val: false, label: 'Reprovar', cor: '#dc2626', bg: '#fef2f2' },
-              ].map(op => (
-                <button key={String(op.val)} onClick={() => setForm(f => ({ ...f, validado: op.val }))}
-                  style={{
-                    flex: 1, height: 42, borderRadius: 8, fontSize: 13, fontWeight: 500, cursor: 'pointer',
-                    border: form.validado === op.val ? `2px solid ${op.cor}` : '1px solid #e0e0e0',
-                    backgroundColor: form.validado === op.val ? op.bg : 'white',
-                    color: form.validado === op.val ? op.cor : '#555',
-                  }}>{op.label}</button>
-              ))}
+            <div>
+              <label style={{ display: 'block', fontSize: 12, color: '#666', marginBottom: 5, fontWeight: 600 }}>Observação {!form.validado && <span style={{ color: '#dc2626' }}>*</span>}</label>
+              <textarea value={form.observacao} onChange={e => setForm(f => ({ ...f, observacao: e.target.value }))} placeholder={!form.validado ? 'Informe o motivo...' : 'Opcional...'} rows={3} style={{ ...inp, height: 'auto', padding: '8px 12px', resize: 'none' }} />
             </div>
-          </div>
+            {erro && <div style={{ fontSize: 13, color: '#b91c1c', backgroundColor: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, padding: '8px 12px' }}>{erro}</div>}
+          </>}
 
-          {/* OBSERVAÇÃO */}
-          <div>
-            <label style={{ display: 'block', fontSize: 12, color: '#666', marginBottom: 5, fontWeight: 600 }}>
-              Observação {!form.validado && <span style={{ color: '#dc2626' }}>*</span>}
-            </label>
-            <textarea
-              value={form.observacao}
-              onChange={e => setForm(f => ({ ...f, observacao: e.target.value }))}
-              placeholder={!form.validado ? 'Informe o motivo da reprovação...' : 'Observação opcional...'}
-              rows={3}
-              style={{ ...inputStyle, height: 'auto', padding: '8px 12px', resize: 'none' }}
-            />
-          </div>
-
-          {erro && (
-            <div style={{ fontSize: 13, color: '#b91c1c', backgroundColor: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, padding: '8px 12px' }}>
-              {erro}
-            </div>
-          )}
-
-          {/* HISTÓRICO */}
           {auditorias.length > 0 && (
             <div>
-              <p style={{ fontSize: 13, fontWeight: 600, color: '#333', margin: '0 0 10px' }}>Histórico de auditorias</p>
+              <p style={{ fontSize: 13, fontWeight: 600, color: '#333', margin: '0 0 10px' }}>Histórico</p>
               {auditorias.map((log, i) => (
                 <div key={log.id} style={{ border: '1px solid #f0f0f0', borderRadius: 8, padding: '10px 14px', marginBottom: 8, borderLeft: `3px solid ${log.validado ? '#16a34a' : '#dc2626'}` }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <span style={{ fontSize: 12, fontWeight: 500, color: log.validado ? '#16a34a' : '#dc2626' }}>
-                      {log.validado ? '✓ Validado' : '✗ Reprovado'}
-                      {i === 0 && <span style={{ fontSize: 10, color: '#aaa', marginLeft: 8 }}>mais recente</span>}
-                    </span>
+                    <span style={{ fontSize: 12, fontWeight: 500, color: log.validado ? '#16a34a' : '#dc2626' }}>{log.validado ? '✓ Aprovado' : '✗ Reprovado'}{i === 0 && <span style={{ fontSize: 10, color: '#aaa', marginLeft: 8 }}>mais recente</span>}</span>
                     <span style={{ fontSize: 11, color: '#aaa' }}>{new Date(log.data_auditoria).toLocaleString('pt-BR')}</span>
                   </div>
                   <p style={{ fontSize: 12, color: '#666', margin: '4px 0 0' }}>{log.auditor_email}</p>
@@ -217,382 +252,479 @@ function ModalAuditoria({ registro, usuarioEmail, onFechar, onAtualizar }: {
             </div>
           )}
         </div>
-
-        {/* FOOTER */}
-        <div style={{ padding: '16px 28px', borderTop: '1px solid #f0f0f0', display: 'flex', gap: 12, justifyContent: 'flex-end' }}>
-          <button onClick={onFechar} style={{ height: 38, padding: '0 20px', border: '1px solid #e0e0e0', borderRadius: 8, fontSize: 13, cursor: 'pointer', background: 'white', color: '#555' }}>
-            Cancelar
-          </button>
-          <button onClick={salvar} disabled={salvando} style={{
-            height: 38, padding: '0 24px',
-            backgroundColor: form.validado ? '#16a34a' : '#dc2626',
-            color: 'white', border: 'none', borderRadius: 8,
-            fontSize: 13, fontWeight: 500, cursor: salvando ? 'not-allowed' : 'pointer',
-            opacity: salvando ? 0.7 : 1,
-          }}>
-            {salvando ? 'Salvando...' : form.validado ? 'Confirmar aprovação' : 'Confirmar reprovação'}
-          </button>
-        </div>
+        {podeAuditar && (
+          <div style={{ padding: '16px 28px', borderTop: '1px solid #f0f0f0', display: 'flex', gap: 12, justifyContent: 'flex-end' }}>
+            <button onClick={onClose} style={{ height: 38, padding: '0 20px', border: '1px solid #e0e0e0', borderRadius: 8, fontSize: 13, cursor: 'pointer', background: 'white', color: '#555' }}>Cancelar</button>
+            <button onClick={salvar} disabled={salvando} style={{ height: 38, padding: '0 24px', backgroundColor: form.validado ? '#16a34a' : '#dc2626', color: 'white', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 500, cursor: salvando ? 'not-allowed' : 'pointer', opacity: salvando ? 0.7 : 1 }}>
+              {salvando ? 'Salvando...' : form.validado ? 'Confirmar aprovação' : 'Confirmar reprovação'}
+            </button>
+          </div>
+        )}
       </div>
     </div>
   )
 }
 
 // ─── PÁGINA PRINCIPAL ─────────────────────────────────────────────────────────
-
 export default function AuditoriaPage() {
-  const router = useRouter()
-  const { usuario } = useAuth()
-  const [registros, setRegistros] = useState<Registro[]>([])
-  const [carregando, setCarregando] = useState(true)
-  const [filtroBase, setFiltroBase] = useState('')
-  const [filtroBusca, setFiltroBusca] = useState('')
-  const [bases, setBases] = useState<{ id: number; nome: string }[]>([])
-  const [ordemColuna, setOrdemColuna] = useState<OrdemColuna>('vencimento')
-  const [ordemDirecao, setOrdemDirecao] = useState<OrdemDirecao>('asc')
-  const [filtroCard, setFiltroCard] = useState<FiltroCard>(null)
-  const [registroSelecionado, setRegistroSelecionado] = useState<Registro | null>(null)
-  const [pagina, setPagina] = useState(1)
+  const router = useRouter(); const { usuario } = useAuth()
+  const [abaAtiva, setAbaAtiva] = useState<AbaAtiva>('nrpo')
+  const [bases, setBases] = useState<Base[]>([])
+
+  // ── NR/PO ──
+  const [registrosNRPO, setRegistrosNRPO] = useState<RegistroNRPO[]>([])
+  const [loadingNRPO, setLoadingNRPO] = useState(true)
+  const [buscaNRPO, setBuscaNRPO] = useState('')
+  const [filtroBaseNRPO, setFiltroBaseNRPO] = useState('')
+  const [filtroSitsNRPO, setFiltroSitsNRPO] = useState<string[]>([])
+  const [sitsDispNRPO, setSitsDispNRPO] = useState<string[]>([])
+  const [filtroTipoNRPO, setFiltroTipoNRPO] = useState('')
+  const [cardNRPO, setCardNRPO] = useState<CardFiltro>(null)
+  const [ordNRPO, setOrdNRPO] = useState('vencimento')
+  const [ordDirNRPO, setOrdDirNRPO] = useState<OrdemDirecao>('asc')
+  const [modalNRPO, setModalNRPO] = useState<RegistroNRPO | null>(null)
+
+  // ── ASO ──
+  const [registrosASO, setRegistrosASO] = useState<RegistroASO[]>([])
+  const [loadingASO, setLoadingASO] = useState(true)
+  const [buscaASO, setBuscaASO] = useState('')
+  const [filtroBaseASO, setFiltroBaseASO] = useState('')
+  const [filtroSitsASO, setFiltroSitsASO] = useState<string[]>([])
+  const [sitsDispASO, setSitsDispASO] = useState<string[]>([])
+  const [filtroTipoASO, setFiltroTipoASO] = useState('')
+  const [cardASO, setCardASO] = useState<CardFiltro>(null)
+  const [ordASO, setOrdASO] = useState('data_realizacao')
+  const [ordDirASO, setOrdDirASO] = useState<OrdemDirecao>('desc')
+  const [modalASO, setModalASO] = useState<RegistroASO | null>(null)
 
   useEffect(() => {
     async function init() {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) { router.push('/login'); return }
-      const { data: b } = await supabase.from('bases').select('id, nome').order('nome')
+      const { data: b } = await supabase.from('bases').select('id,nome').order('nome')
       setBases(b || [])
-      await buscar()
+      await Promise.all([buscarNRPO(null), buscarASO(null)])
     }
     init()
   }, [])
 
-  const buscar = useCallback(async () => {
-    setCarregando(true)
-
-    let query = supabase
-      .from('registros_exames')
-      .select(`
-        id, matricula_colaborador, regra_id, data_realizacao, data_vencimento, url_arquivo,
-        logs_auditoria (id, auditor_email, data_auditoria, validado, observacao),
-        colaboradores (nome, bases (id, nome), funcoes (nome)),
-        regras_vencimento (nome_item)
-      `)
-      .eq('is_atual', true)
-      .order('data_vencimento', { ascending: true })
-
-    // Filtro por base direto na query do Supabase
-    if (filtroBase) {
-      query = (query as any).eq('colaboradores.bases.id', parseInt(filtroBase))
+  // ─── BUSCAR NR/PO ──────────────────────────────────────────────────────────
+  async function buscarNRPO(sitsP: string[] | null) {
+    const primeiraVez = sitsP === null
+    setLoadingNRPO(true)
+    let todos: any[] = []; let from = 0
+    while (true) {
+      const { data } = await supabase.from('registros_exames')
+        .select(`id, matricula_colaborador, regra_id, data_realizacao, data_vencimento, url_arquivo, is_atual,
+          logs_auditoria(id, auditor_email, data_auditoria, validado, observacao),
+          colaboradores(nome, situacao, bases(id, nome), funcoes(nome))`)
+        .eq('is_atual', true)
+        .not('url_arquivo', 'is', null)
+        .range(from, from + 499)
+      if (!data || data.length === 0) break
+      todos = [...todos, ...data]; if (data.length < 500) break; from += 500
     }
-
-    const { data } = await query
-    let resultado = (data as unknown as Registro[]) || []
-
-    // Filtro por base no resultado (join no Supabase pode não filtrar diretamente)
-    if (filtroBase) {
-      resultado = resultado.filter(r =>
-        r.colaboradores?.bases?.id === parseInt(filtroBase)
-      )
+    if (primeiraVez) {
+      const sitsUnicas = [...new Set(todos.map((r: any) => r.colaboradores?.situacao).filter(Boolean))].sort() as string[]
+      setSitsDispNRPO(sitsUnicas)
+      const sitsIniciais = sitsUnicas.filter(s => !SITUACOES_EXCLUIDAS_PADRAO.includes(s))
+      setFiltroSitsNRPO(sitsIniciais)
+      todos = todos.filter((r: any) => sitsIniciais.includes(r.colaboradores?.situacao))
+    } else if (sitsP && sitsP.length > 0) {
+      todos = todos.filter((r: any) => sitsP.includes(r.colaboradores?.situacao))
     }
-
-    // Filtro por bases do usuário (não admin)
-    if (usuario && usuario.nivel !== 'admin' && usuario.bases?.length > 0) {
-      resultado = resultado.filter(r =>
-       usuario.bases.includes(r.colaboradores?.bases?.id ?? -1)
-      )
-    }
-
-    setRegistros(resultado)
-    setPagina(1)
-    setCarregando(false)
-  }, [filtroBase, usuario])
-
-  useEffect(() => { buscar() }, [buscar])
-
-  function toggleOrdem(coluna: OrdemColuna) {
-    if (ordemColuna === coluna) setOrdemDirecao(d => d === 'asc' ? 'desc' : 'asc')
-    else { setOrdemColuna(coluna); setOrdemDirecao('asc') }
-    setPagina(1)
+    setRegistrosNRPO(todos.map((r: any) => ({
+      id: r.id, matricula_colaborador: r.matricula_colaborador,
+      regra_id: r.regra_id, data_realizacao: r.data_realizacao,
+      data_vencimento: r.data_vencimento, url_arquivo: r.url_arquivo,
+      logs_auditoria: r.logs_auditoria || [],
+      nome_colaborador: r.colaboradores?.nome || '—',
+      funcao: r.colaboradores?.funcoes?.nome || null,
+      base: r.colaboradores?.bases?.nome || null,
+      base_id: r.colaboradores?.bases?.id || null,
+      situacao: r.colaboradores?.situacao || '',
+      nome_item: REGRAS_NR_PO.find(rg => rg.id === r.regra_id)?.nome || String(r.regra_id),
+    })))
+    setLoadingNRPO(false)
   }
 
-  function limparFiltros() {
-    setFiltroBusca('')
-    setFiltroBase('')
-    setFiltroCard(null)
-    setPagina(1)
-  }
+  // ─── BUSCAR ASO ────────────────────────────────────────────────────────────
+  async function buscarASO(sitsP: string[] | null) {
+    const primeiraVez = sitsP === null
+    setLoadingASO(true)
 
-  // ─── STATS (sem filtro de card) ───────────────────────────────────────────
-
-  const registrosFiltradosBase = registros.filter(r => {
-    if (filtroBusca) {
-      const b = filtroBusca.toLowerCase()
-      if (
-        !r.colaboradores?.nome?.toLowerCase().includes(b) &&
-        !r.regras_vencimento?.nome_item?.toLowerCase().includes(b) &&
-        !r.matricula_colaborador?.toLowerCase().includes(b)
-      ) return false
+    // Buscar ASOs com arquivo
+    let asos: any[] = []; let from = 0
+    while (true) {
+      const { data } = await supabase.from('asos')
+        .select('id, matricula_colaborador, tipo, data_realizacao, data_vencimento, url_arquivo, logs_auditoria(id, auditor_email, data_auditoria, validado, observacao)')
+        .not('url_arquivo', 'is', null)
+        .in('tipo', ['admissional', 'periodico', 'retorno', 'mudanca_risco'])
+        .range(from, from + 499)
+      if (!data || data.length === 0) break
+      asos = [...asos, ...data]; if (data.length < 500) break; from += 500
     }
-    return true
-  })
 
-  const statsPendente = registrosFiltradosBase.filter(r => getStatusAuditoria(r).key === 'pendente').length
-  const statsReprovado = registrosFiltradosBase.filter(r => getStatusAuditoria(r).key === 'reprovado').length
-  const statsValidado = registrosFiltradosBase.filter(r => getStatusAuditoria(r).key === 'validado').length
-  const statsSemArquivo = registrosFiltradosBase.filter(r => !r.url_arquivo).length
+    // Buscar colaboradores em lotes
+    const mats = [...new Set(asos.map((a: any) => a.matricula_colaborador))]
+    let colabs: any[] = []
+    const LOTE = 100
+    for (let i = 0; i < mats.length; i += LOTE) {
+      const lote = mats.slice(i, i + LOTE)
+      const { data } = await supabase.from('colaboradores')
+        .select('matricula, nome, situacao, bases(id, nome), funcoes(nome)')
+        .in('matricula', lote)
+      if (data) colabs = [...colabs, ...data]
+    }
+    const colabMap: Record<string, any> = {}
+    colabs.forEach(c => { colabMap[c.matricula] = c })
 
-  // ─── FILTRO + ORDENAÇÃO ───────────────────────────────────────────────────
+    let todos = asos.map((a: any) => {
+      const c = colabMap[a.matricula_colaborador] || {}
+      return {
+        id: a.id, matricula_colaborador: a.matricula_colaborador,
+        tipo: a.tipo, data_realizacao: a.data_realizacao,
+        data_vencimento: a.data_vencimento, url_arquivo: a.url_arquivo,
+        logs_auditoria: a.logs_auditoria || [],
+        nome_colaborador: c.nome || '—', funcao: c.funcoes?.nome || null,
+        base: c.bases?.nome || null, base_id: c.bases?.id || null,
+        situacao: c.situacao || '',
+      }
+    })
 
-  const filtrados = registrosFiltradosBase.filter(r => {
-    if (!filtroCard) return true
-    if (filtroCard === 'sem_arquivo') return !r.url_arquivo
-    return getStatusAuditoria(r).key === filtroCard
-  })
+    if (primeiraVez) {
+      const sitsUnicas = [...new Set(todos.map((r: any) => r.situacao).filter(Boolean))].sort() as string[]
+      setSitsDispASO(sitsUnicas)
+      const sitsIniciais = sitsUnicas.filter(s => !SITUACOES_EXCLUIDAS_PADRAO.includes(s))
+      setFiltroSitsASO(sitsIniciais)
+      todos = todos.filter((r: any) => sitsIniciais.includes(r.situacao))
+    } else if (sitsP && sitsP.length > 0) {
+      todos = todos.filter((r: any) => sitsP.includes(r.situacao))
+    }
 
-  const ordenados = [...filtrados].sort((a, b) => {
-    let vA = '', vB = ''
-    if (ordemColuna === 'matricula') { vA = a.matricula_colaborador; vB = b.matricula_colaborador }
-    else if (ordemColuna === 'colaborador') { vA = a.colaboradores?.nome || ''; vB = b.colaboradores?.nome || '' }
-    else if (ordemColuna === 'funcao') { vA = a.colaboradores?.funcoes?.nome || ''; vB = b.colaboradores?.funcoes?.nome || '' }
-    else if (ordemColuna === 'base') { vA = a.colaboradores?.bases?.nome || ''; vB = b.colaboradores?.bases?.nome || '' }
-    else if (ordemColuna === 'treinamento') { vA = a.regras_vencimento?.nome_item || ''; vB = b.regras_vencimento?.nome_item || '' }
-    else if (ordemColuna === 'realizado') { vA = a.data_realizacao; vB = b.data_realizacao }
-    else if (ordemColuna === 'vencimento') { vA = a.data_vencimento; vB = b.data_vencimento }
-    else if (ordemColuna === 'status') { vA = getStatusAuditoria(a).key; vB = getStatusAuditoria(b).key }
-    return ordemDirecao === 'asc' ? vA.localeCompare(vB) : vB.localeCompare(vA)
-  })
-
-  // ─── PAGINAÇÃO ────────────────────────────────────────────────────────────
-
-  const totalPaginas = Math.ceil(ordenados.length / PAGE_SIZE)
-  const paginados = ordenados.slice((pagina - 1) * PAGE_SIZE, pagina * PAGE_SIZE)
-
-  const temFiltroAtivo = !!(filtroBusca || filtroBase || filtroCard)
-
-  const selectStyle: React.CSSProperties = {
-    height: 36, border: '1px solid #e0e0e0', borderRadius: 8,
-    padding: '0 10px', fontSize: 13, backgroundColor: 'white', color: '#555', outline: 'none',
+    setRegistrosASO(todos)
+    setLoadingASO(false)
   }
 
-  // ─── CORES VENCIMENTO ─────────────────────────────────────────────────────
+  useEffect(() => { if (sitsDispNRPO.length > 0) buscarNRPO(filtroSitsNRPO) }, [filtroBaseNRPO, filtroSitsNRPO])
+  useEffect(() => { if (sitsDispASO.length > 0) buscarASO(filtroSitsASO) }, [filtroBaseASO, filtroSitsASO])
 
-  const coresVenc: Record<string, { bg: string; cor: string }> = {
-    valido: { bg: '#f0fdf4', cor: '#15803d' },
-    proximo: { bg: '#fffbeb', cor: '#b45309' },
-    vencido: { bg: '#fef2f2', cor: '#b91c1c' },
+  // ─── FILTROS + STATS NR/PO ────────────────────────────────────────────────
+  const filtradosNRPO = useMemo(() => {
+    let r = registrosNRPO
+    if (filtroBaseNRPO) r = r.filter(x => String(x.base_id) === filtroBaseNRPO)
+    if (buscaNRPO) { const b = buscaNRPO.toLowerCase(); r = r.filter(x => x.nome_colaborador.toLowerCase().includes(b) || x.matricula_colaborador.includes(buscaNRPO) || x.nome_item.toLowerCase().includes(b)) }
+    if (filtroTipoNRPO) r = r.filter(x => x.nome_item === filtroTipoNRPO)
+    return r
+  }, [registrosNRPO, filtroBaseNRPO, buscaNRPO, filtroTipoNRPO])
+
+  const statsNRPO = useMemo(() => {
+    const r = { total: 0, aprovado: 0, reprovado: 0, pendente: 0 }
+    filtradosNRPO.forEach(x => { r.total++; r[getStatusAuditoria(x.logs_auditoria)]++ })
+    return r
+  }, [filtradosNRPO])
+
+  const filtradosNRPOCard = useMemo(() => cardNRPO ? filtradosNRPO.filter(x => getStatusAuditoria(x.logs_auditoria) === cardNRPO) : filtradosNRPO, [filtradosNRPO, cardNRPO])
+
+  const ordenadosNRPO = useMemo(() => [...filtradosNRPOCard].sort((a, b) => {
+    let vA: string = '', vB: string = ''
+    if (ordNRPO === 'matricula') { vA = a.matricula_colaborador; vB = b.matricula_colaborador }
+    else if (ordNRPO === 'nome') { vA = a.nome_colaborador; vB = b.nome_colaborador }
+    else if (ordNRPO === 'base') { vA = a.base || ''; vB = b.base || '' }
+    else if (ordNRPO === 'funcao') { vA = a.funcao || ''; vB = b.funcao || '' }
+    else if (ordNRPO === 'tipo') { vA = a.nome_item; vB = b.nome_item }
+    else if (ordNRPO === 'realizado') { vA = a.data_realizacao; vB = b.data_realizacao }
+    else if (ordNRPO === 'vencimento') { vA = a.data_vencimento; vB = b.data_vencimento }
+    else if (ordNRPO === 'status') { vA = getStatusAuditoria(a.logs_auditoria); vB = getStatusAuditoria(b.logs_auditoria) }
+    return ordDirNRPO === 'asc' ? vA.localeCompare(vB) : vB.localeCompare(vA)
+  }), [filtradosNRPOCard, ordNRPO, ordDirNRPO])
+
+  // ─── FILTROS + STATS ASO ──────────────────────────────────────────────────
+  const filtradosASO = useMemo(() => {
+    let r = registrosASO
+    if (filtroBaseASO) r = r.filter(x => String(x.base_id) === filtroBaseASO)
+    if (buscaASO) { const b = buscaASO.toLowerCase(); r = r.filter(x => x.nome_colaborador.toLowerCase().includes(b) || x.matricula_colaborador.includes(buscaASO)) }
+    if (filtroTipoASO) r = r.filter(x => x.tipo === filtroTipoASO)
+    return r
+  }, [registrosASO, filtroBaseASO, buscaASO, filtroTipoASO])
+
+  const statsASO = useMemo(() => {
+    const r = { total: 0, aprovado: 0, reprovado: 0, pendente: 0 }
+    filtradosASO.forEach(x => { r.total++; r[getStatusAuditoria(x.logs_auditoria)]++ })
+    return r
+  }, [filtradosASO])
+
+  const filtradosASOCard = useMemo(() => cardASO ? filtradosASO.filter(x => getStatusAuditoria(x.logs_auditoria) === cardASO) : filtradosASO, [filtradosASO, cardASO])
+
+  const ordenadosASO = useMemo(() => [...filtradosASOCard].sort((a, b) => {
+    let vA: string = '', vB: string = ''
+    if (ordASO === 'matricula') { vA = a.matricula_colaborador; vB = b.matricula_colaborador }
+    else if (ordASO === 'nome') { vA = a.nome_colaborador; vB = b.nome_colaborador }
+    else if (ordASO === 'base') { vA = a.base || ''; vB = b.base || '' }
+    else if (ordASO === 'funcao') { vA = a.funcao || ''; vB = b.funcao || '' }
+    else if (ordASO === 'tipo') { vA = a.tipo; vB = b.tipo }
+    else if (ordASO === 'data_realizacao') { vA = a.data_realizacao; vB = b.data_realizacao }
+    else if (ordASO === 'status') { vA = getStatusAuditoria(a.logs_auditoria); vB = getStatusAuditoria(b.logs_auditoria) }
+    return ordDirASO === 'asc' ? vA.localeCompare(vB) : vB.localeCompare(vA)
+  }), [filtradosASOCard, ordASO, ordDirASO])
+
+  function toggleOrdNRPO(c: string) { if (ordNRPO === c) setOrdDirNRPO(d => d === 'asc' ? 'desc' : 'asc'); else { setOrdNRPO(c); setOrdDirNRPO('asc') } }
+  function toggleOrdASO(c: string) { if (ordASO === c) setOrdDirASO(d => d === 'asc' ? 'desc' : 'asc'); else { setOrdASO(c); setOrdDirASO('asc') } }
+
+  const sitsIniciaisNRPO = useMemo(() => sitsDispNRPO.filter(s => !SITUACOES_EXCLUIDAS_PADRAO.includes(s)), [sitsDispNRPO])
+  const sitsIniciaisASO = useMemo(() => sitsDispASO.filter(s => !SITUACOES_EXCLUIDAS_PADRAO.includes(s)), [sitsDispASO])
+
+  const sel: React.CSSProperties = { height: 36, border: '1px solid #e0e0e0', borderRadius: 8, padding: '0 10px', fontSize: 13, backgroundColor: 'white', color: '#555' }
+  const tdBase = (ex?: React.CSSProperties): React.CSSProperties => ({ padding: '8px 14px', color: '#666', whiteSpace: 'nowrap', verticalAlign: 'middle', borderBottom: '1px solid #f5f5f5', borderRight: '1px solid #f0f0f0', ...ex })
+  const stickyTd = (bg: string, l: number): React.CSSProperties => ({ position: 'sticky', left: l, backgroundColor: bg, zIndex: 10, borderRight: '2px solid #d0d0d0' })
+
+  const CARDS_LABELS = [
+    { key: null as CardFiltro, label: 'Total Documentos', cor: '#4a4a49', getVal: (s: typeof statsNRPO) => s.total },
+    { key: 'aprovado' as CardFiltro, label: 'Aprovados', cor: '#16a34a', getVal: (s: typeof statsNRPO) => s.aprovado },
+    { key: 'reprovado' as CardFiltro, label: 'Reprovados', cor: '#dc2626', getVal: (s: typeof statsNRPO) => s.reprovado },
+    { key: 'pendente' as CardFiltro, label: 'Pendentes', cor: '#888', getVal: (s: typeof statsNRPO) => s.pendente },
+  ]
+
+  async function salvarAuditoriaASO(aso: RegistroASO, validado: boolean, obs: string) {
+    await supabase.from('logs_auditoria').insert({
+      aso_id: aso.id, auditor_email: usuario?.email || '',
+      validado, observacao: obs || null, data_auditoria: new Date().toISOString(),
+    })
+    await buscarASO(filtroSitsASO)
+    setModalASO(null)
+  }
+
+  async function salvarAuditoriaNRPO(reg: RegistroNRPO, validado: boolean, obs: string) {
+    await supabase.from('logs_auditoria').insert({
+      registro_id: reg.id, auditor_email: usuario?.email || '',
+      validado, observacao: obs || null, data_auditoria: new Date().toISOString(),
+    })
+    await buscarNRPO(filtroSitsNRPO)
+    setModalNRPO(null)
   }
 
   return (
     <div style={{ fontFamily: 'Arial, sans-serif', display: 'flex', flexDirection: 'column', height: '100%' }}>
-      <h1 style={{ fontSize: 18, fontWeight: 600, color: '#1a1a1a', margin: '0 0 12px' }}>Auditoria</h1>
-
-      {/* CARDS */}
-      {carregando ? (
-        <div style={{ display: 'flex', gap: 12, marginBottom: 12, overflowX: 'auto', paddingBottom: 4 }}>
-          {[...Array(5)].map((_, i) => (
-            <div key={i} style={{ backgroundColor: 'white', borderRadius: 10, padding: '10px 16px', border: '1px solid #f0f0f0', minWidth: 140, flex: '1 0 140px' }}>
-              <div style={{ height: 10, backgroundColor: '#f0f0f0', borderRadius: 4, marginBottom: 8, width: '60%' }} />
-              <div style={{ height: 24, backgroundColor: '#f0f0f0', borderRadius: 4, width: '40%' }} />
-            </div>
-          ))}
-        </div>
-      ) : (
-        <div style={{ display: 'flex', gap: 12, marginBottom: 12, overflowX: 'auto', paddingBottom: 4 }}>
-          {[
-            { label: 'Total', valor: registrosFiltradosBase.length, cor: '#4a4a49', status: null },
-            { label: 'Pendentes', valor: statsPendente, cor: '#888', status: 'pendente' as FiltroCard },
-            { label: 'Reprovados', valor: statsReprovado, cor: '#dc2626', status: 'reprovado' as FiltroCard },
-            { label: 'Validados', valor: statsValidado, cor: '#16a34a', status: 'validado' as FiltroCard },
-            { label: 'Sem Arquivo', valor: statsSemArquivo, cor: '#d97706', status: 'sem_arquivo' as FiltroCard },
-          ].map((card, i) => {
-            const ativo = filtroCard === card.status && card.status !== null
-            return (
-              <div
-                key={i}
-                onClick={() => card.status !== null && setFiltroCard(ativo ? null : card.status)}
-                style={{
-                  backgroundColor: ativo ? card.cor + '12' : 'white',
-                  borderRadius: 10, padding: '10px 16px',
-                  border: ativo ? `2px solid ${card.cor}` : '1px solid #f0f0f0',
-                  minWidth: 140, flex: '1 0 140px',
-                  cursor: card.status !== null ? 'pointer' : 'default',
-                  transition: 'all 0.15s ease',
-                  boxShadow: ativo ? `0 2px 8px ${card.cor}30` : 'none',
-                }}
-              >
-                <p style={{ fontSize: 11, color: '#888', margin: '0 0 4px' }}>
-                  {card.label}
-                  {ativo && <span style={{ marginLeft: 6, fontSize: 10, color: card.cor }}>● filtrado</span>}
-                </p>
-                <p style={{ fontSize: 24, fontWeight: 600, color: card.cor, margin: 0 }}>
-                  {card.valor.toLocaleString('pt-BR')}
-                </p>
-              </div>
-            )
-          })}
-        </div>
-      )}
-
-      {/* FILTROS */}
-      <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap', alignItems: 'center' }}>
-        <input
-          type="text"
-          placeholder="Nome, matrícula ou treinamento..."
-          value={filtroBusca}
-          onChange={e => { setFiltroBusca(e.target.value); setPagina(1) }}
-          style={{ ...selectStyle, width: 260, padding: '0 12px' }}
-        />
-        <select value={filtroBase} onChange={e => { setFiltroBase(e.target.value); setPagina(1) }} style={{ ...selectStyle, width: 180 }}>
-          <option value="">Todas as bases</option>
-          {bases.map(b => <option key={b.id} value={b.id}>{b.nome}</option>)}
-        </select>
-        <div style={{ flex: 1 }} />
-        <span style={{ fontSize: 13, color: '#888' }}>
-          {ordenados.length} registro{ordenados.length !== 1 ? 's' : ''}
-        </span>
-        {temFiltroAtivo && (
-          <button onClick={limparFiltros} style={{ height: 36, padding: '0 12px', fontSize: 12, border: '1px solid #fca5a5', borderRadius: 8, backgroundColor: '#fef2f2', color: '#dc2626', cursor: 'pointer' }}>
-            ✕ Limpar
-          </button>
-        )}
+      {/* TÍTULO */}
+      <div style={{ marginBottom: 16 }}>
+        <h1 style={{ fontSize: 18, fontWeight: 600, color: '#1a1a1a', margin: 0 }}>Auditoria</h1>
+        <p style={{ fontSize: 12, color: '#888', margin: '3px 0 0', fontWeight: 500 }}>Validação de documentos com arquivo anexado</p>
       </div>
 
-      {/* TABELA */}
-      {carregando ? (
-        <p style={{ color: '#888', fontSize: 14 }}>Carregando...</p>
-      ) : (
+      {/* ABAS */}
+      <div style={{ display: 'flex', gap: 4, marginBottom: 16, borderBottom: '2px solid #f0f0f0' }}>
+        {([{ key: 'nrpo', label: 'NR / PO' }, { key: 'aso', label: 'ASO' }] as { key: AbaAtiva; label: string }[]).map(aba => (
+          <button key={aba.key} onClick={() => setAbaAtiva(aba.key)} style={{
+            padding: '10px 20px', fontSize: 14, fontWeight: abaAtiva === aba.key ? 600 : 400,
+            border: 'none', background: 'none', cursor: 'pointer',
+            color: abaAtiva === aba.key ? COR : '#888',
+            borderBottom: abaAtiva === aba.key ? `2px solid ${COR}` : '2px solid transparent',
+            marginBottom: -2, transition: 'all 0.15s',
+          }}>{aba.label}</button>
+        ))}
+      </div>
+
+      {/* ─── ABA NR/PO ─────────────────────────────────────────────────────── */}
+      {abaAtiva === 'nrpo' && (
         <>
-          <div style={{ overflowX: 'auto', overflowY: 'auto', maxHeight: 'calc(100vh - 300px)', borderRadius: 12, border: '1px solid #f0f0f0', flex: 1 }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', backgroundColor: 'white', fontSize: 13 }}>
-              <thead>
-                <tr style={{ backgroundColor: '#fafafa', borderBottom: '1px solid #f0f0f0' }}>
-                  <ThOrdenavel label="Matrícula" coluna="matricula" ordemAtual={ordemColuna} direcao={ordemDirecao} onClick={toggleOrdem} />
-                  <ThOrdenavel label="Colaborador" coluna="colaborador" ordemAtual={ordemColuna} direcao={ordemDirecao} onClick={toggleOrdem} />
-                  <ThOrdenavel label="Função" coluna="funcao" ordemAtual={ordemColuna} direcao={ordemDirecao} onClick={toggleOrdem} />
-                  <ThOrdenavel label="Base" coluna="base" ordemAtual={ordemColuna} direcao={ordemDirecao} onClick={toggleOrdem} />
-                  <ThOrdenavel label="Treinamento" coluna="treinamento" ordemAtual={ordemColuna} direcao={ordemDirecao} onClick={toggleOrdem} />
-                  <ThOrdenavel label="Realizado" coluna="realizado" ordemAtual={ordemColuna} direcao={ordemDirecao} onClick={toggleOrdem} />
-                  <ThOrdenavel label="Vencimento" coluna="vencimento" ordemAtual={ordemColuna} direcao={ordemDirecao} onClick={toggleOrdem} />
-                  <th style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 700, color: '#333', whiteSpace: 'nowrap', position: 'sticky', top: 0, backgroundColor: '#fafafa', zIndex: 3 }}>Arquivo</th>
-                  <ThOrdenavel label="Status" coluna="status" ordemAtual={ordemColuna} direcao={ordemDirecao} onClick={toggleOrdem} />
-                  <th style={{ padding: '10px 16px', position: 'sticky', top: 0, backgroundColor: '#fafafa', zIndex: 3 }} />
-                </tr>
-              </thead>
-              <tbody>
-                {paginados.length === 0 ? (
-                  <tr>
-                    <td colSpan={10} style={{ padding: '48px 16px', textAlign: 'center', color: '#aaa', fontSize: 14 }}>
-                      <p style={{ fontSize: 28, margin: '0 0 8px' }}>📋</p>
-                      Nenhum registro encontrado.
-                    </td>
-                  </tr>
-                ) : paginados.map((r, i) => {
-                  const statusAud = getStatusAuditoria(r)
-                  const statusVenc = getStatusVencimento(r.data_vencimento)
-                  const corVenc = coresVenc[statusVenc]
-                  return (
-                    <tr key={r.id} style={{ borderBottom: '1px solid #f5f5f5', backgroundColor: i % 2 === 0 ? 'white' : '#fafafa' }}>
-                      <td style={{ padding: '10px 16px', color: '#666', whiteSpace: 'nowrap' }}>
-                        {r.matricula_colaborador}
-                      </td>
-                      <td style={{ padding: '10px 16px', fontWeight: 500, color: '#333', whiteSpace: 'nowrap' }}>
-                        {r.colaboradores?.nome || '—'}
-                      </td>
-                      <td style={{ padding: '10px 16px', color: '#666', whiteSpace: 'nowrap' }}>
-                        {r.colaboradores?.funcoes?.nome || '—'}
-                      </td>
-                      <td style={{ padding: '10px 16px', color: '#666', whiteSpace: 'nowrap' }}>
-                        {r.colaboradores?.bases?.nome || '—'}
-                      </td>
-                      <td style={{ padding: '10px 16px', color: '#666', whiteSpace: 'nowrap' }}>
-                        {r.regras_vencimento?.nome_item || '—'}
-                      </td>
-                      <td style={{ padding: '10px 16px', color: '#666', whiteSpace: 'nowrap' }}>
-                        {new Date(r.data_realizacao + 'T12:00:00').toLocaleDateString('pt-BR')}
-                      </td>
-                      {/* VENCIMENTO COM COR */}
-                      <td style={{ padding: '8px 12px', whiteSpace: 'nowrap', backgroundColor: corVenc.bg }}>
-                        <span style={{ fontSize: 12, color: corVenc.cor, fontWeight: 500 }}>
-                          {new Date(r.data_vencimento + 'T12:00:00').toLocaleDateString('pt-BR')}
-                        </span>
-                      </td>
-                      <td style={{ padding: '10px 16px' }}>
-                        {r.url_arquivo
-                          ? <a href={r.url_arquivo} target="_blank" rel="noreferrer" style={{ color: '#2563eb', fontSize: 12 }}>Ver arquivo</a>
-                          : <span style={{ color: '#f59e0b', fontSize: 12 }}>Sem arquivo</span>
-                        }
-                      </td>
-                      <td style={{ padding: '10px 16px' }}>
-                        <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 99, backgroundColor: statusAud.bg, color: statusAud.cor }}>
-                          {statusAud.label}
-                        </span>
-                      </td>
-                      <td style={{ padding: '10px 16px' }}>
-                        {usuario?.pode_auditar && (
-                          <button onClick={() => setRegistroSelecionado(r)} style={{
-                            fontSize: 12, color: COR, background: 'none',
-                            border: `1px solid ${COR}`, borderRadius: 6,
-                            padding: '4px 12px', cursor: 'pointer',
-                          }}>
-                            Auditar
-                          </button>
-                        )}
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
+          {/* CARDS */}
+          <div style={{ display: 'flex', gap: 12, marginBottom: 12, overflowX: 'auto', paddingBottom: 4 }}>
+            {CARDS_LABELS.map((card, i) => {
+              const val = card.getVal(statsNRPO)
+              const ativo = cardNRPO === card.key && card.key !== null
+              return (
+                <div key={i} onClick={() => card.key !== null && setCardNRPO(ativo ? null : card.key)}
+                  style={{ backgroundColor: ativo ? card.cor + '10' : 'white', borderRadius: 10, padding: '10px 16px', border: ativo ? `2px solid ${card.cor}` : '1px solid #f0f0f0', minWidth: 160, flex: '1 0 160px', cursor: card.key !== null ? 'pointer' : 'default', transition: 'all 0.15s', boxShadow: ativo ? `0 2px 8px ${card.cor}30` : 'none' }}>
+                  <p style={{ fontSize: 11, color: '#888', margin: '0 0 4px' }}>{card.label}{ativo && <span style={{ marginLeft: 6, fontSize: 10, color: card.cor }}>● filtrado</span>}</p>
+                  <p style={{ fontSize: 24, fontWeight: 600, color: card.cor, margin: 0 }}>{val.toLocaleString('pt-BR')}</p>
+                </div>
+              )
+            })}
           </div>
 
-          {/* PAGINAÇÃO */}
-          {totalPaginas > 1 && (
-            <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 8, paddingTop: 16 }}>
-              <button
-                onClick={() => setPagina(p => Math.max(1, p - 1))}
-                disabled={pagina === 1}
-                style={{ height: 32, padding: '0 14px', borderRadius: 8, border: '1px solid #e0e0e0', backgroundColor: 'white', fontSize: 13, cursor: pagina === 1 ? 'not-allowed' : 'pointer', color: pagina === 1 ? '#ccc' : '#555' }}
-              >← Anterior</button>
+          {/* FILTROS */}
+          <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+            <input type="text" placeholder="Nome, matrícula ou treinamento..." value={buscaNRPO} onChange={e => setBuscaNRPO(e.target.value)} style={{ ...sel, width: 240, padding: '0 12px' }} />
+            <select value={filtroBaseNRPO} onChange={e => setFiltroBaseNRPO(e.target.value)} style={{ ...sel, width: 150 }}>
+              <option value="">Todas as bases</option>
+              {bases.map(b => <option key={b.id} value={b.id}>{b.nome}</option>)}
+            </select>
+            <FiltroSituacao opcoes={sitsDispNRPO} selecionadas={filtroSitsNRPO} onChange={setFiltroSitsNRPO} />
+            <select value={filtroTipoNRPO} onChange={e => setFiltroTipoNRPO(e.target.value)} style={{ ...sel, width: 160 }}>
+              <option value="">Todos os tipos</option>
+              {REGRAS_NR_PO.map(r => <option key={r.id} value={r.nome}>{r.nome}</option>)}
+            </select>
+            <div style={{ flex: 1 }} />
+            {(buscaNRPO || filtroBaseNRPO || filtroTipoNRPO || cardNRPO) && (
+              <button onClick={() => { setBuscaNRPO(''); setFiltroBaseNRPO(''); setFiltroTipoNRPO(''); setCardNRPO(null); setFiltroSitsNRPO(sitsIniciaisNRPO) }} style={{ height: 36, padding: '0 12px', fontSize: 12, border: '1px solid #fca5a5', borderRadius: 8, backgroundColor: '#fef2f2', color: '#dc2626', cursor: 'pointer' }}>✕ Limpar</button>
+            )}
+            <BotaoExportar onClick={t => {
+              const dados = ordenadosNRPO.map(r => ({ 'Matrícula': r.matricula_colaborador, 'Nome': r.nome_colaborador, 'Base': r.base || '', 'Função': r.funcao || '', 'Tipo': r.nome_item, 'Realizado': formatarData(r.data_realizacao), 'Vencimento': formatarData(r.data_vencimento), 'Status': getStatusAuditoria(r.logs_auditoria) }))
+              t === 'csv' ? exportCSV(dados) : exportXLSX(dados)
+            }} />
+          </div>
 
-              {Array.from({ length: totalPaginas }, (_, i) => i + 1)
-                .filter(p => p === 1 || p === totalPaginas || Math.abs(p - pagina) <= 1)
-                .reduce<(number | '...')[]>((acc, p, idx, arr) => {
-                  if (idx > 0 && typeof arr[idx - 1] === 'number' && (p as number) - (arr[idx - 1] as number) > 1) acc.push('...')
-                  acc.push(p)
-                  return acc
-                }, [])
-                .map((p, idx) => p === '...'
-                  ? <span key={`ellipsis-${idx}`} style={{ fontSize: 13, color: '#aaa', padding: '0 4px' }}>…</span>
-                  : (
-                    <button key={p} onClick={() => setPagina(p as number)} style={{
-                      height: 32, width: 32, borderRadius: 8, fontSize: 13, cursor: 'pointer',
-                      border: pagina === p ? `2px solid ${COR}` : '1px solid #e0e0e0',
-                      backgroundColor: pagina === p ? '#fdf2f5' : 'white',
-                      color: pagina === p ? COR : '#555', fontWeight: pagina === p ? 600 : 400,
-                    }}>{p}</button>
-                  )
-                )}
-
-              <button
-                onClick={() => setPagina(p => Math.min(totalPaginas, p + 1))}
-                disabled={pagina === totalPaginas}
-                style={{ height: 32, padding: '0 14px', borderRadius: 8, border: '1px solid #e0e0e0', backgroundColor: 'white', fontSize: 13, cursor: pagina === totalPaginas ? 'not-allowed' : 'pointer', color: pagina === totalPaginas ? '#ccc' : '#555' }}
-              >Próxima →</button>
-
-              <span style={{ fontSize: 12, color: '#888', marginLeft: 8 }}>
-                Página {pagina} de {totalPaginas}
-              </span>
-            </div>
-          )}
+          {/* TABELA NR/PO */}
+          {loadingNRPO ? <p style={{ color: '#888', fontSize: 14 }}>Carregando...</p>
+            : <div style={{ overflowX: 'auto', overflowY: 'auto', maxHeight: 'calc(100vh - 270px)', borderRadius: 12, border: '1px solid #f0f0f0', flex: 1 }}>
+              <table style={{ width: '100%', borderCollapse: 'separate', borderSpacing: 0, backgroundColor: 'white', fontSize: 13 }}>
+                <thead>
+                  <tr style={{ backgroundColor: '#fafafa' }}>
+                    <Th label="Matrícula" col="matricula" ord={ordNRPO} dir={ordDirNRPO} onClick={toggleOrdNRPO} left={0} style={{ width: COL_MATRICULA, minWidth: COL_MATRICULA }} />
+                    <Th label="Nome" col="nome" ord={ordNRPO} dir={ordDirNRPO} onClick={toggleOrdNRPO} left={COL_MATRICULA} style={{ width: COL_NOME, minWidth: COL_NOME }} />
+                    <Th label="Base" col="base" ord={ordNRPO} dir={ordDirNRPO} onClick={toggleOrdNRPO} />
+                    <Th label="Função" col="funcao" ord={ordNRPO} dir={ordDirNRPO} onClick={toggleOrdNRPO} />
+                    <Th label="Tipo" col="tipo" ord={ordNRPO} dir={ordDirNRPO} onClick={toggleOrdNRPO} />
+                    <Th label="Realizado" col="realizado" ord={ordNRPO} dir={ordDirNRPO} onClick={toggleOrdNRPO} />
+                    <Th label="Vencimento" col="vencimento" ord={ordNRPO} dir={ordDirNRPO} onClick={toggleOrdNRPO} />
+                    <Th label="Dias" col="dias" ord={ordNRPO} dir={ordDirNRPO} onClick={toggleOrdNRPO} style={{ textAlign: 'center' }} />
+                    <th style={{ padding: '10px 12px', fontWeight: 700, color: '#333', whiteSpace: 'nowrap', position: 'sticky', top: 0, backgroundColor: '#fafafa', zIndex: 100, borderBottom: '2px solid #e0e0e0', borderRight: '1px solid #e8e8e8' }}>Arquivo</th>
+                    <Th label="Status" col="status" ord={ordNRPO} dir={ordDirNRPO} onClick={toggleOrdNRPO} />
+                    <th style={{ padding: '10px 12px', position: 'sticky', top: 0, backgroundColor: '#fafafa', zIndex: 100, borderBottom: '2px solid #e0e0e0' }} />
+                  </tr>
+                </thead>
+                <tbody>
+                  {ordenadosNRPO.length === 0
+                    ? <tr><td colSpan={11} style={{ padding: '40px 20px', textAlign: 'center', color: '#aaa', fontSize: 14 }}>Nenhum registro encontrado.</td></tr>
+                    : ordenadosNRPO.map((r, i) => {
+                      const bg = i % 2 === 0 ? 'white' : '#fafafa'
+                      const statusAud = getStatusAuditoria(r.logs_auditoria)
+                      const coresAud = statusAudCores(statusAud)
+                      const dias = calcularDias(r.data_vencimento)
+                      const coresVenc = statusVencCores(dias)
+                      return (
+                        <tr key={r.id} style={{ backgroundColor: bg }}>
+                          <td style={{ ...tdBase(), ...stickyTd(bg, 0), width: COL_MATRICULA, minWidth: COL_MATRICULA }}>{r.matricula_colaborador}</td>
+                          <td style={{ ...tdBase(), ...stickyTd(bg, COL_MATRICULA), width: COL_NOME, minWidth: COL_NOME }}><span style={{ fontWeight: 500, color: '#333' }}>{r.nome_colaborador}</span></td>
+                          <td style={tdBase()}>{r.base || '—'}</td>
+                          <td style={tdBase()}>{r.funcao || '—'}</td>
+                          <td style={tdBase()}><span style={{ fontSize: 12, fontWeight: 600, color: '#555', backgroundColor: '#f0f0f0', padding: '2px 8px', borderRadius: 6 }}>{r.nome_item}</span></td>
+                          <td style={tdBase()}>{formatarData(r.data_realizacao)}</td>
+                          <td style={{ ...tdBase(), backgroundColor: coresVenc.bg }}><span style={{ color: coresVenc.text, fontWeight: 500 }}>{formatarData(r.data_vencimento)}</span></td>
+                          <td style={{ ...tdBase({ textAlign: 'center' }), backgroundColor: coresVenc.bg }}>
+                            {dias !== null ? <span style={{ fontSize: 13, fontWeight: 700, color: coresVenc.text }}>{Math.abs(dias)}<span style={{ fontSize: 10, marginLeft: 2 }}>{dias >= 0 ? 'd' : 'd v.'}</span></span> : '—'}
+                          </td>
+                          <td style={tdBase()}><a href={r.url_arquivo!} target="_blank" rel="noreferrer" style={{ color: '#2563eb', fontSize: 12 }}>Ver arquivo</a></td>
+                          <td style={tdBase()}><span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 99, backgroundColor: coresAud.bg, color: coresAud.text, fontWeight: 500, textTransform: 'capitalize' }}>{statusAud}</span></td>
+                          <td style={tdBase()}>
+                            {usuario?.pode_auditar && <button onClick={() => setModalNRPO(r)} style={{ fontSize: 12, color: COR, background: 'none', border: `1px solid ${COR}`, borderRadius: 6, padding: '4px 12px', cursor: 'pointer' }}>Auditar</button>}
+                          </td>
+                        </tr>
+                      )
+                    })}
+                </tbody>
+              </table>
+            </div>}
         </>
       )}
 
-      {/* MODAL */}
-      {registroSelecionado && usuario?.pode_auditar && (
+      {/* ─── ABA ASO ───────────────────────────────────────────────────────── */}
+      {abaAtiva === 'aso' && (
+        <>
+          {/* CARDS */}
+          <div style={{ display: 'flex', gap: 12, marginBottom: 12, overflowX: 'auto', paddingBottom: 4 }}>
+            {CARDS_LABELS.map((card, i) => {
+              const val = card.getVal(statsASO)
+              const ativo = cardASO === card.key && card.key !== null
+              return (
+                <div key={i} onClick={() => card.key !== null && setCardASO(ativo ? null : card.key)}
+                  style={{ backgroundColor: ativo ? card.cor + '10' : 'white', borderRadius: 10, padding: '10px 16px', border: ativo ? `2px solid ${card.cor}` : '1px solid #f0f0f0', minWidth: 160, flex: '1 0 160px', cursor: card.key !== null ? 'pointer' : 'default', transition: 'all 0.15s', boxShadow: ativo ? `0 2px 8px ${card.cor}30` : 'none' }}>
+                  <p style={{ fontSize: 11, color: '#888', margin: '0 0 4px' }}>{card.label}{ativo && <span style={{ marginLeft: 6, fontSize: 10, color: card.cor }}>● filtrado</span>}</p>
+                  <p style={{ fontSize: 24, fontWeight: 600, color: card.cor, margin: 0 }}>{val.toLocaleString('pt-BR')}</p>
+                </div>
+              )
+            })}
+          </div>
+
+          {/* FILTROS */}
+          <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+            <input type="text" placeholder="Nome ou matrícula..." value={buscaASO} onChange={e => setBuscaASO(e.target.value)} style={{ ...sel, width: 220, padding: '0 12px' }} />
+            <select value={filtroBaseASO} onChange={e => setFiltroBaseASO(e.target.value)} style={{ ...sel, width: 150 }}>
+              <option value="">Todas as bases</option>
+              {bases.map(b => <option key={b.id} value={b.id}>{b.nome}</option>)}
+            </select>
+            <FiltroSituacao opcoes={sitsDispASO} selecionadas={filtroSitsASO} onChange={setFiltroSitsASO} />
+            <select value={filtroTipoASO} onChange={e => setFiltroTipoASO(e.target.value)} style={{ ...sel, width: 150 }}>
+              <option value="">Todos os tipos</option>
+              {TIPOS_ASO.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+            </select>
+            <div style={{ flex: 1 }} />
+            {(buscaASO || filtroBaseASO || filtroTipoASO || cardASO) && (
+              <button onClick={() => { setBuscaASO(''); setFiltroBaseASO(''); setFiltroTipoASO(''); setCardASO(null); setFiltroSitsASO(sitsIniciaisASO) }} style={{ height: 36, padding: '0 12px', fontSize: 12, border: '1px solid #fca5a5', borderRadius: 8, backgroundColor: '#fef2f2', color: '#dc2626', cursor: 'pointer' }}>✕ Limpar</button>
+            )}
+            <BotaoExportar onClick={t => {
+              const dados = ordenadosASO.map(r => ({ 'Matrícula': r.matricula_colaborador, 'Nome': r.nome_colaborador, 'Base': r.base || '', 'Função': r.funcao || '', 'Tipo': TIPOS_ASO.find(x => x.value === r.tipo)?.label || r.tipo, 'Realizado': formatarData(r.data_realizacao), 'Vencimento': formatarData(r.data_vencimento), 'Status': getStatusAuditoria(r.logs_auditoria) }))
+              t === 'csv' ? exportCSV(dados) : exportXLSX(dados)
+            }} />
+          </div>
+
+          {/* TABELA ASO */}
+          {loadingASO ? <p style={{ color: '#888', fontSize: 14 }}>Carregando...</p>
+            : <div style={{ overflowX: 'auto', overflowY: 'auto', maxHeight: 'calc(100vh - 270px)', borderRadius: 12, border: '1px solid #f0f0f0', flex: 1 }}>
+              <table style={{ width: '100%', borderCollapse: 'separate', borderSpacing: 0, backgroundColor: 'white', fontSize: 13 }}>
+                <thead>
+                  <tr style={{ backgroundColor: '#fafafa' }}>
+                    <Th label="Matrícula" col="matricula" ord={ordASO} dir={ordDirASO} onClick={toggleOrdASO} left={0} style={{ width: COL_MATRICULA, minWidth: COL_MATRICULA }} />
+                    <Th label="Nome" col="nome" ord={ordASO} dir={ordDirASO} onClick={toggleOrdASO} left={COL_MATRICULA} style={{ width: COL_NOME, minWidth: COL_NOME }} />
+                    <Th label="Base" col="base" ord={ordASO} dir={ordDirASO} onClick={toggleOrdASO} />
+                    <Th label="Função" col="funcao" ord={ordASO} dir={ordDirASO} onClick={toggleOrdASO} />
+                    <Th label="Tipo ASO" col="tipo" ord={ordASO} dir={ordDirASO} onClick={toggleOrdASO} />
+                    <Th label="Realizado" col="data_realizacao" ord={ordASO} dir={ordDirASO} onClick={toggleOrdASO} />
+                    <Th label="Vencimento" col="data_vencimento" ord={ordASO} dir={ordDirASO} onClick={toggleOrdASO} />
+                    <th style={{ padding: '10px 12px', fontWeight: 700, color: '#333', whiteSpace: 'nowrap', position: 'sticky', top: 0, backgroundColor: '#fafafa', zIndex: 100, borderBottom: '2px solid #e0e0e0', borderRight: '1px solid #e8e8e8' }}>Arquivo</th>
+                    <Th label="Status" col="status" ord={ordASO} dir={ordDirASO} onClick={toggleOrdASO} />
+                    <th style={{ padding: '10px 12px', position: 'sticky', top: 0, backgroundColor: '#fafafa', zIndex: 100, borderBottom: '2px solid #e0e0e0' }} />
+                  </tr>
+                </thead>
+                <tbody>
+                  {ordenadosASO.length === 0
+                    ? <tr><td colSpan={10} style={{ padding: '40px 20px', textAlign: 'center', color: '#aaa', fontSize: 14 }}>Nenhum registro encontrado.</td></tr>
+                    : ordenadosASO.map((r, i) => {
+                      const bg = i % 2 === 0 ? 'white' : '#fafafa'
+                      const statusAud = getStatusAuditoria(r.logs_auditoria)
+                      const coresAud = statusAudCores(statusAud)
+                      const dias = calcularDias(r.data_vencimento)
+                      const coresVenc = statusVencCores(dias)
+                      const tipoLabel = TIPOS_ASO.find(t => t.value === r.tipo)?.sigla || r.tipo.toUpperCase().slice(0, 3)
+                      return (
+                        <tr key={r.id} style={{ backgroundColor: bg }}>
+                          <td style={{ ...tdBase(), ...stickyTd(bg, 0), width: COL_MATRICULA, minWidth: COL_MATRICULA }}>{r.matricula_colaborador}</td>
+                          <td style={{ ...tdBase(), ...stickyTd(bg, COL_MATRICULA), width: COL_NOME, minWidth: COL_NOME }}><span style={{ fontWeight: 500, color: '#333' }}>{r.nome_colaborador}</span></td>
+                          <td style={tdBase()}>{r.base || '—'}</td>
+                          <td style={tdBase()}>{r.funcao || '—'}</td>
+                          <td style={tdBase()}><span style={{ fontSize: 12, fontWeight: 700, color: COR, backgroundColor: '#fdf2f5', padding: '2px 8px', borderRadius: 6 }}>{tipoLabel}</span></td>
+                          <td style={tdBase()}>{formatarData(r.data_realizacao)}</td>
+                          <td style={{ ...tdBase(), backgroundColor: r.data_vencimento ? coresVenc.bg : 'transparent' }}><span style={{ color: r.data_vencimento ? coresVenc.text : '#aaa', fontWeight: 500 }}>{formatarData(r.data_vencimento)}</span></td>
+                          <td style={tdBase()}><a href={r.url_arquivo!} target="_blank" rel="noreferrer" style={{ color: '#2563eb', fontSize: 12 }}>Ver arquivo</a></td>
+                          <td style={tdBase()}><span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 99, backgroundColor: coresAud.bg, color: coresAud.text, fontWeight: 500, textTransform: 'capitalize' }}>{statusAud}</span></td>
+                          <td style={tdBase()}>
+                            {usuario?.pode_auditar && <button onClick={() => setModalASO(r)} style={{ fontSize: 12, color: COR, background: 'none', border: `1px solid ${COR}`, borderRadius: 6, padding: '4px 12px', cursor: 'pointer' }}>Auditar</button>}
+                          </td>
+                        </tr>
+                      )
+                    })}
+                </tbody>
+              </table>
+            </div>}
+        </>
+      )}
+
+      {/* MODAIS */}
+      {modalNRPO && (
         <ModalAuditoria
-          registro={registroSelecionado}
-          usuarioEmail={usuario.email}
-          onFechar={() => setRegistroSelecionado(null)}
-          onAtualizar={buscar}
+          titulo={modalNRPO.nome_colaborador} subtitulo={modalNRPO.nome_item}
+          logs={modalNRPO.logs_auditoria} urlArquivo={modalNRPO.url_arquivo}
+          onClose={() => setModalNRPO(null)} podeAuditar={usuario?.pode_auditar || false}
+          onSalvar={async (v, o) => salvarAuditoriaNRPO(modalNRPO, v, o)}
+        />
+      )}
+      {modalASO && (
+        <ModalAuditoria
+          titulo={modalASO.nome_colaborador}
+          subtitulo={TIPOS_ASO.find(t => t.value === modalASO.tipo)?.label || modalASO.tipo}
+          logs={modalASO.logs_auditoria} urlArquivo={modalASO.url_arquivo}
+          onClose={() => setModalASO(null)} podeAuditar={usuario?.pode_auditar || false}
+          onSalvar={async (v, o) => salvarAuditoriaASO(modalASO, v, o)}
         />
       )}
     </div>

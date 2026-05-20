@@ -10,7 +10,7 @@ const COR = '#9f183c'
 const COL_MATRICULA = 110
 const COL_NOME = 230
 const SITUACOES_EXCLUIDAS_PADRAO = ['DEMITIDO', 'AF.PREVIDÊNCIA', 'LICENÇA MATERNIDADE']
-const CATEGORIAS = ['A', 'B', 'C', 'D', 'E', 'AB', 'AC', 'AD', 'AE']
+const CATEGORIAS = ['A', 'B', 'C', 'D', 'E']
 
 // ─── TIPOS ────────────────────────────────────────────────────────────────────
 interface CNH {
@@ -255,7 +255,7 @@ function ModalCNH({ colab, cnh, onClose, onUpdate, nivel }: {
       const payload = {
         matricula_colaborador: colab.matricula,
         numero_cnh: form.numero_cnh || null,
-        categoria: form.categoria.join(', ') || null,
+        categoria: form.categoria.sort((a, b) => 'ABCDE'.indexOf(a) - 'ABCDE'.indexOf(b)).join('') || null,
         exigencia: form.exigencia,
         data_emissao: form.data_emissao || null,
         data_vencimento: form.data_vencimento || null,
@@ -636,7 +636,7 @@ export default function CNHPage() {
 
 const statsFiltrados = useMemo(() => colabs.filter(c => {
   if (busca) { const b = busca.toLowerCase(); if (!c.nome.toLowerCase().includes(b) && !c.matricula.includes(busca)) return false }
-  if (filtroCategoria && !c.cnh?.categoria?.includes(filtroCategoria)) return false
+  if (filtroCategoria && !c.cnh?.categoria?.split('').includes(filtroCategoria)) return false
   if (filtroExigencia && c.cnh?.exigencia !== filtroExigencia) return false
   return true
 }), [colabs, busca, filtroCategoria, filtroExigencia])
@@ -732,10 +732,15 @@ const filtrados = useMemo(() => statsFiltrados.filter(c => {
           {bases.map(b => <option key={b.id} value={b.id}>{b.nome}</option>)}
         </select>
         <FiltroSituacao opcoes={situacoesDisp} selecionadas={filtroSits} onChange={setFiltroSits} />
-        <select value={filtroCategoria} onChange={e => setFiltroCategoria(e.target.value)} style={{ ...sel, width: 130 }}>
-          <option value="">Todas categorias</option>
-          {CATEGORIAS.map(c => <option key={c} value={c}>{c}</option>)}
-        </select>
+        <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+       {CATEGORIAS.map(cat => (
+    <button key={cat} onClick={() => setFiltroCategoria(f => f === cat ? '' : cat)}
+      style={{ height: 36, width: 36, borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: 'pointer', border: `1px solid ${filtroCategoria === cat ? COR : '#e0e0e0'}`, backgroundColor: filtroCategoria === cat ? '#fdf2f5' : 'white', color: filtroCategoria === cat ? COR : '#555', transition: 'all 0.15s' }}>
+      {cat}
+    </button>
+  ))}
+  {filtroCategoria && <button onClick={() => setFiltroCategoria('')} style={{ height: 36, padding: '0 10px', fontSize: 12, border: '1px solid #fca5a5', borderRadius: 8, backgroundColor: '#fef2f2', color: '#dc2626', cursor: 'pointer' }}>✕</button>}
+</div>
         <select value={filtroExigencia} onChange={e => setFiltroExigencia(e.target.value)} style={{ ...sel, width: 130 }}>
           <option value="">Toda exigência</option>
           <option value="SIM">Exigida</option>
