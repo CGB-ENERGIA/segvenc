@@ -27,7 +27,6 @@ interface Colaborador {
 interface Treinamento { id: number; nome: string; validade_dias: number }
 interface Base { id: number; nome: string }
 
-// mapa nome do treinamento → campo da matriz_po
 const CAMPO_MATRIZ: Record<string, 'direcao_defensiva' | 'pilotagem_defensiva'> = {
   'Direção Defensiva':   'direcao_defensiva',
   'Pilotagem Defensiva': 'pilotagem_defensiva',
@@ -36,7 +35,7 @@ const CAMPO_MATRIZ: Record<string, 'direcao_defensiva' | 'pilotagem_defensiva'> 
 type StatusObrig = 'SIM' | 'NAO' | 'NA'
 type OrdemColuna = 'matricula' | 'nome' | 'funcao' | 'processo' | 'base' | 'situacao' | 'gerencia' | 'supervisor' | `exame_${number}`
 type OrdemDirecao = 'asc' | 'desc'
-type AbaModal = 'info' | 'documento' | 'programacao' | 'auditoria'
+type AbaModal = 'info' | 'documento' | 'programacao' | 'auditoria' | 'historico'
 
 // ─── HELPERS ─────────────────────────────────────────────────────────────────
 function primeiroNome(s: string | null) { return s ? s.trim().split(' ')[0] : '—' }
@@ -56,17 +55,15 @@ function getObrig(colab: Colaborador, nomeTreinamento: string): StatusObrig {
   return 'NA'
 }
 
-// Verifica se colaborador é N/A em TODAS as colunas visíveis
 function isNACompleto(colab: Colaborador, treinamentos: Treinamento[], colunasVisiveis: string[]) {
   const treinamentosVisiveis = treinamentos.filter(t => colunasVisiveis.includes(`exame_${t.id}`))
   if (treinamentosVisiveis.length === 0) return false
   return treinamentosVisiveis.every(t => {
     const obrig = getObrig(colab, t.nome)
     if (obrig === 'NA') return true
-    // NAO sem registro e sem data_vencimento também trata como N/A para efeito de filtro
     if (obrig === 'NAO') {
       const reg = colab.registros_exames.find(r => r.regra_id === t.id)
-      return !reg // sem registro = ocultar
+      return !reg
     }
     return false
   })
@@ -220,11 +217,8 @@ function Th({ label, col, ord, dir, onClick, left, style }: { label: string; col
     cursor: 'pointer', userSelect: 'none', color: ativo ? COR : '#333',
     borderBottom: ativo ? `2px solid ${COR}` : '2px solid #e0e0e0',
     borderRight: isSticky ? '2px solid #d0d0d0' : '1px solid #e8e8e8',
-    position: 'sticky', top: 0,
-    left: isSticky ? left : undefined,
-    zIndex: isSticky ? 110 : 100,
-    backgroundColor: '#fafafa',
-    ...style,
+    position: 'sticky', top: 0, left: isSticky ? left : undefined,
+    zIndex: isSticky ? 110 : 100, backgroundColor: '#fafafa', ...style,
   }}>
     {label} {ativo ? (dir === 'asc' ? '↑' : '↓') : <span style={{ color: '#ccc' }}>↕</span>}
   </th>
@@ -232,44 +226,32 @@ function Th({ label, col, ord, dir, onClick, left, style }: { label: string; col
 
 // ─── MODAL CONFIRMAR N/A → SIM ────────────────────────────────────────────────
 function ModalConfirmarNA({ colab, treinamento, onClose, onConfirmar }: {
-  colab: Colaborador; treinamento: Treinamento
-  onClose: () => void; onConfirmar: () => void
+  colab: Colaborador; treinamento: Treinamento; onClose: () => void; onConfirmar: () => void
 }) {
   const [salvando, setSalvando] = useState(false)
   const [erro, setErro] = useState('')
-
   async function confirmar() {
     setSalvando(true); setErro('')
     const campo = CAMPO_MATRIZ[treinamento.nome]
     if (!campo) { setErro('Campo não encontrado.'); setSalvando(false); return }
-    const { error } = await supabase
-      .from('matriz_po')
-      .upsert({ matricula: colab.matricula, [campo]: 'SIM' }, { onConflict: 'matricula' })
+    const { error } = await supabase.from('matriz_po').upsert({ matricula: colab.matricula, [campo]: 'SIM' }, { onConflict: 'matricula' })
     if (error) { setErro(error.message); setSalvando(false); return }
-    setSalvando(false)
-    onConfirmar()
+    setSalvando(false); onConfirmar()
   }
-
   return (
     <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 350 }}>
       <div style={{ backgroundColor: 'white', borderRadius: 16, padding: 28, width: '100%', maxWidth: 440, boxShadow: '0 20px 60px rgba(0,0,0,0.2)' }}>
         <div style={{ marginBottom: 20 }}>
           <h2 style={{ fontSize: 16, fontWeight: 600, color: '#1a1a1a', margin: '0 0 6px' }}>Alterar para obrigatório?</h2>
-          <p style={{ fontSize: 13, color: '#666', margin: 0, lineHeight: 1.5 }}>
-            O treinamento <strong>{treinamento.nome}</strong> está marcado como <strong>N/A</strong> para <strong>{colab.nome}</strong>.
-          </p>
+          <p style={{ fontSize: 13, color: '#666', margin: 0, lineHeight: 1.5 }}>O treinamento <strong>{treinamento.nome}</strong> está marcado como <strong>N/A</strong> para <strong>{colab.nome}</strong>.</p>
         </div>
         <div style={{ backgroundColor: '#fffbeb', border: '1px solid #fde68a', borderRadius: 10, padding: '12px 16px', marginBottom: 20 }}>
-          <p style={{ fontSize: 13, color: '#92400e', margin: 0 }}>
-            ⚠️ Ao confirmar, o status mudará de <strong>N/A → SIM</strong> e o campo aparecerá como obrigatório para este colaborador. Você poderá registrar o treinamento em seguida.
-          </p>
+          <p style={{ fontSize: 13, color: '#92400e', margin: 0 }}>⚠️ Ao confirmar, o status mudará de <strong>N/A → SIM</strong> e o campo aparecerá como obrigatório para este colaborador. Você poderá registrar o treinamento em seguida.</p>
         </div>
         {erro && <p style={{ fontSize: 12, color: '#dc2626', marginBottom: 12 }}>{erro}</p>}
         <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
           <button onClick={onClose} disabled={salvando} style={{ height: 38, padding: '0 18px', border: '1px solid #e0e0e0', borderRadius: 8, fontSize: 13, cursor: 'pointer', background: 'white', color: '#555' }}>Cancelar</button>
-          <button onClick={confirmar} disabled={salvando} style={{ height: 38, padding: '0 22px', backgroundColor: COR, color: 'white', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 500, cursor: salvando ? 'not-allowed' : 'pointer', opacity: salvando ? 0.7 : 1 }}>
-            {salvando ? 'Salvando...' : 'Confirmar e registrar'}
-          </button>
+          <button onClick={confirmar} disabled={salvando} style={{ height: 38, padding: '0 22px', backgroundColor: COR, color: 'white', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 500, cursor: salvando ? 'not-allowed' : 'pointer', opacity: salvando ? 0.7 : 1 }}>{salvando ? 'Salvando...' : 'Confirmar e registrar'}</button>
         </div>
       </div>
     </div>
@@ -286,20 +268,14 @@ function CelulaExame({ reg, onClick, onIcone, onClickNA, compacto, obrig }: {
   const pad = compacto ? '6px 8px' : '8px 12px'; const minW = compacto ? 120 : 150
   const base: React.CSSProperties = { padding: pad, textAlign: 'center', verticalAlign: 'middle', minWidth: minW, borderBottom: '1px solid #f5f5f5', borderRight: '1px solid #f0f0f0' }
 
- // ── PRIMEIRO: registro sem data_vencimento → sempre "Possui" verde ─────────
   if (reg && !reg.data_vencimento) {
     const temArq = !!reg.url_arquivo
     const aud = [...(reg.logs_auditoria || [])].sort((a, b) => new Date(b.data_auditoria).getTime() - new Date(a.data_auditoria).getTime())[0]
     return <td style={{ ...base, backgroundColor: '#f0fdf4', cursor: 'pointer' }} onClick={onClick}>
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-          <Icone tipo="check" cor="#16a34a" size={13} />
-          <span style={{ fontSize: compacto ? 10 : 11, color: '#16a34a', fontWeight: 600 }}>Possui</span>
-        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}><Icone tipo="check" cor="#16a34a" size={13} /><span style={{ fontSize: compacto ? 10 : 11, color: '#16a34a', fontWeight: 600 }}>Possui</span></div>
         <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-          <span onClick={e => { e.stopPropagation(); onIcone('documento') }} style={{ cursor: 'pointer', display: 'flex' }}>
-            <Icone tipo="clipe" cor={temArq ? '#2563eb' : '#9ca3af'} size={13} />
-          </span>
+          <span onClick={e => { e.stopPropagation(); onIcone('documento') }} style={{ cursor: 'pointer', display: 'flex' }}><Icone tipo="clipe" cor={temArq ? '#2563eb' : '#9ca3af'} size={13} /></span>
           {!aud && <Icone tipo="relogio" cor="#9ca3af" titulo="Pendente" size={13} />}
           {aud?.validado && <Icone tipo="check" cor="#16a34a" titulo="Validado" size={13} />}
           {aud && !aud.validado && <Icone tipo="x_circulo" cor="#dc2626" titulo="Reprovado" size={13} />}
@@ -308,8 +284,6 @@ function CelulaExame({ reg, onClick, onIcone, onClickNA, compacto, obrig }: {
     </td>
   }
 
-
-  // ── N/A: clicável para mudar para SIM ──────────────────────────────────────
   if (obrig === 'NA') return (
     <td style={{ ...base, background: 'repeating-linear-gradient(45deg,#fdfdfd,#fdfdfd 8px,#efefef 8px,#efefef 16px)', cursor: 'pointer' }}
       onClick={onClickNA} title="N/A — clique para marcar como obrigatório">
@@ -319,7 +293,6 @@ function CelulaExame({ reg, onClick, onIcone, onClickNA, compacto, obrig }: {
       </div>
     </td>
   )
-
 
   if (obrig === 'NAO' && !reg) return (
     <td style={{ ...base, backgroundColor: '#f9f9f9', cursor: 'pointer' }} onClick={onClick} title="Opcional — clique para adicionar">
@@ -447,17 +420,48 @@ function ModalExame({ dados, abaInicial, onClose, onUpdate, email, podeAuditar, 
   const [arquivo, setArquivo] = useState<File | null>(null); const [uploading, setUploading] = useState(false); const [errUp, setErrUp] = useState('')
   const [formAud, setFormAud] = useState({ validado: true, observacao: '' }); const [salvAud, setSalvAud] = useState(false); const [errAud, setErrAud] = useState('')
   const [modalExc, setModalExc] = useState(false); const [confNome, setConfNome] = useState(''); const [excluindo, setExcluindo] = useState(false); const [errExc, setErrExc] = useState('')
+  const [historico, setHistorico] = useState<Registro[]>([])
+  const [loadHistorico, setLoadHistorico] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
   const { colab, reg, treinamento } = dados
+
   useEffect(() => { if (aba === 'programacao' && reg) loadProgramacoes() }, [aba, reg])
+  useEffect(() => { if (aba === 'historico') carregarHistorico() }, [aba])
+
   async function loadProgramacoes() { if (!reg) return; setLoadProgs(true); const { data } = await supabase.from('programacoes_exames').select('*').eq('registro_id', reg.id).order('created_at', { ascending: false }); setProgs(data || []); setLoadProgs(false) }
+
+  async function carregarHistorico() {
+    setLoadHistorico(true)
+    const { data } = await supabase
+      .from('registros_exames')
+      .select('id, regra_id, data_realizacao, data_vencimento, url_arquivo, logs_auditoria(id, auditor_email, data_auditoria, validado, observacao)')
+      .eq('matricula_colaborador', colab.matricula)
+      .eq('regra_id', treinamento.id)
+      .eq('is_atual', false)
+      .order('data_realizacao', { ascending: false })
+    setHistorico((data || []) as Registro[])
+    setLoadHistorico(false)
+  }
+
   async function salvarProg() { if (!reg || !formProg.data_programada) { setErrProg('Informe a data.'); return } setSalvProg(true); setErrProg(''); const { error } = await supabase.from('programacoes_exames').insert({ registro_id: reg.id, matricula_colaborador: colab.matricula, regra_id: treinamento.id, data_programada: formProg.data_programada, observacao: formProg.observacao || null, criado_por: email }); if (error) { setErrProg(error.message); setSalvProg(false); return } setFormProg({ data_programada: '', observacao: '' }); setSalvProg(false); loadProgramacoes(); onUpdate() }
   async function fazerUpload() { if (!arquivo || !reg) return; setUploading(true); setErrUp(''); const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19); const ext = arquivo.name.split('.').pop(); const path = `${colab.matricula}/${treinamento.id}/${ts}.${ext}`; const { error: se } = await supabase.storage.from('documentos').upload(path, arquivo, { upsert: false }); if (se) { setErrUp(se.message); setUploading(false); return }; const { data: u } = supabase.storage.from('documentos').getPublicUrl(path); const { error: de } = await supabase.from('registros_exames').update({ url_arquivo: u.publicUrl }).eq('id', reg.id); if (de) { setErrUp(de.message); setUploading(false); return }; setArquivo(null); setUploading(false); onUpdate(); onClose() }
   async function salvarAud() { if (!reg) return; if (!formAud.validado && !formAud.observacao) { setErrAud('Informe o motivo.'); return } setSalvAud(true); setErrAud(''); const { error } = await supabase.from('logs_auditoria').insert({ registro_id: reg.id, auditor_email: email, validado: formAud.validado, observacao: formAud.observacao || null, data_auditoria: new Date().toISOString() }); if (error) { setErrAud(error.message); setSalvAud(false); return } setSalvAud(false); onUpdate(); onClose() }
   async function excluir() { if (!reg) return; if (confNome !== treinamento.nome) { setErrExc('Nome não confere.'); return } setExcluindo(true); const { error } = await supabase.from('registros_exames').delete().eq('id', reg.id); if (error) { setErrExc(error.message); setExcluindo(false); return } onUpdate(); onClose() }
+
   const auds = [...(reg?.logs_auditoria || [])].sort((a, b) => new Date(b.data_auditoria).getTime() - new Date(a.data_auditoria).getTime())
-  const abas: { key: AbaModal; label: string }[] = [{ key: 'info', label: 'Informações' },...(nivel !== 'visualizador' ? [{ key: 'documento' as AbaModal, label: 'Documento' },{ key: 'programacao' as AbaModal, label: 'Programação' },] : []),...(podeAuditar ? [{ key: 'auditoria' as AbaModal, label: 'Auditoria' }] : [])]
+
+  const abas: { key: AbaModal; label: string }[] = [
+    { key: 'info', label: 'Informações' },
+    ...(nivel !== 'visualizador' ? [
+      { key: 'documento' as AbaModal, label: 'Documento' },
+      { key: 'programacao' as AbaModal, label: 'Programação' },
+    ] : []),
+    ...(podeAuditar ? [{ key: 'auditoria' as AbaModal, label: 'Auditoria' }] : []),
+    { key: 'historico' as AbaModal, label: 'Histórico' },
+  ]
+
   const inp: React.CSSProperties = { width: '100%', height: 38, border: '1px solid #e0e0e0', borderRadius: 8, padding: '0 12px', fontSize: 13, boxSizing: 'border-box', outline: 'none' }
+
   return (
     <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 300 }}>
       <div style={{ backgroundColor: 'white', borderRadius: 16, width: '100%', maxWidth: 580, maxHeight: '88vh', display: 'flex', flexDirection: 'column', boxShadow: '0 20px 60px rgba(0,0,0,0.2)' }}>
@@ -469,6 +473,8 @@ function ModalExame({ dados, abaInicial, onClose, onUpdate, email, podeAuditar, 
           <div style={{ display: 'flex' }}>{abas.map(a => <button key={a.key} onClick={() => setAba(a.key)} style={{ padding: '8px 16px', fontSize: 13, fontWeight: aba === a.key ? 600 : 400, border: 'none', background: 'none', cursor: 'pointer', color: aba === a.key ? COR : '#888', borderBottom: aba === a.key ? `2px solid ${COR}` : '2px solid transparent', marginBottom: -1 }}>{a.label}</button>)}</div>
         </div>
         <div style={{ padding: '24px 28px', overflowY: 'auto', flex: 1 }}>
+
+          {/* ── INFO ── */}
           {aba === 'info' && <div>
             {reg ? <>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 24 }}>
@@ -483,6 +489,8 @@ function ModalExame({ dados, abaInicial, onClose, onUpdate, email, podeAuditar, 
               {nivel === 'admin' && <div style={{ marginTop: 24, paddingTop: 20, borderTop: '1px solid #f0f0f0' }}><button onClick={() => { setConfNome(''); setErrExc(''); setModalExc(true) }} style={{ height: 36, padding: '0 16px', fontSize: 12, border: '1px solid #fca5a5', borderRadius: 8, backgroundColor: '#fef2f2', color: '#dc2626', cursor: 'pointer' }}>🗑 Excluir este registro</button></div>}
             </> : <div style={{ textAlign: 'center', padding: '40px 0', color: '#aaa' }}><p style={{ fontSize: 32, margin: '0 0 8px' }}>📋</p><p style={{ fontSize: 14 }}>Nenhum registro encontrado.</p></div>}
           </div>}
+
+          {/* ── MODAL EXCLUIR ── */}
           {modalExc && <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 400 }}>
             <div style={{ backgroundColor: 'white', borderRadius: 16, padding: 28, width: '100%', maxWidth: 440, boxShadow: '0 20px 60px rgba(0,0,0,0.25)' }}>
               <h3 style={{ fontSize: 16, fontWeight: 600, color: '#dc2626', margin: '0 0 8px' }}>Excluir registro</h3>
@@ -496,6 +504,8 @@ function ModalExame({ dados, abaInicial, onClose, onUpdate, email, podeAuditar, 
               </div>
             </div>
           </div>}
+
+          {/* ── DOCUMENTO ── */}
           {aba === 'documento' && <div>
             {reg?.url_arquivo ? <div style={{ marginBottom: 24 }}><p style={{ fontSize: 13, fontWeight: 600, color: '#333', margin: '0 0 12px' }}>Documento atual</p><a href={reg.url_arquivo} target="_blank" rel="noreferrer" style={{ display: 'flex', alignItems: 'center', gap: 10, padding: 16, backgroundColor: '#eff6ff', borderRadius: 10, border: '1px solid #bfdbfe', color: '#2563eb', textDecoration: 'none', fontSize: 13, fontWeight: 500 }}><Icone tipo="olho" cor="#2563eb" size={18} />Visualizar documento</a></div>
               : <div style={{ marginBottom: 24, padding: 16, backgroundColor: '#fffbeb', borderRadius: 10, border: '1px solid #fde68a' }}><p style={{ fontSize: 13, color: '#92400e', margin: 0 }}>⚠️ Nenhum documento anexado ainda.</p></div>}
@@ -509,6 +519,8 @@ function ModalExame({ dados, abaInicial, onClose, onUpdate, email, podeAuditar, 
               {arquivo && <button onClick={fazerUpload} disabled={uploading} style={{ width: '100%', marginTop: 16, height: 40, backgroundColor: COR, color: 'white', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 500, cursor: uploading ? 'not-allowed' : 'pointer', opacity: uploading ? 0.7 : 1 }}>{uploading ? 'Enviando...' : 'Enviar documento'}</button>}
             </>}
           </div>}
+
+          {/* ── PROGRAMAÇÃO ── */}
           {aba === 'programacao' && <div>
             <div style={{ backgroundColor: '#f9f9f9', borderRadius: 10, padding: 16, marginBottom: 24 }}>
               <p style={{ fontSize: 13, fontWeight: 600, color: '#333', margin: '0 0 14px' }}>Nova programação</p>
@@ -526,6 +538,8 @@ function ModalExame({ dados, abaInicial, onClose, onUpdate, email, podeAuditar, 
               {p.observacao && <p style={{ fontSize: 12, color: '#888', margin: '4px 0 0', fontStyle: 'italic' }}>{p.observacao}</p>}
             </div>)}
           </div>}
+
+          {/* ── AUDITORIA ── */}
           {aba === 'auditoria' && podeAuditar && <div>
             {reg?.url_arquivo ? <a href={reg.url_arquivo} target="_blank" rel="noreferrer" style={{ display: 'flex', alignItems: 'center', gap: 10, padding: 14, backgroundColor: '#eff6ff', borderRadius: 10, border: '1px solid #bfdbfe', color: '#2563eb', textDecoration: 'none', fontSize: 13, fontWeight: 500, marginBottom: 20 }}><Icone tipo="olho" cor="#2563eb" size={16} />Visualizar documento antes de auditar</a>
               : <div style={{ padding: 14, backgroundColor: '#fef2f2', borderRadius: 10, border: '1px solid #fecaca', marginBottom: 20 }}><p style={{ fontSize: 13, color: '#b91c1c', margin: 0 }}>⚠️ Sem documento. Recomenda-se solicitar antes de auditar.</p></div>}
@@ -537,6 +551,46 @@ function ModalExame({ dados, abaInicial, onClose, onUpdate, email, podeAuditar, 
             <button onClick={salvarAud} disabled={salvAud || !reg} style={{ width: '100%', height: 40, fontSize: 13, fontWeight: 500, cursor: salvAud || !reg ? 'not-allowed' : 'pointer', border: 'none', borderRadius: 8, opacity: salvAud || !reg ? 0.7 : 1, backgroundColor: formAud.validado ? '#16a34a' : '#dc2626', color: 'white' }}>{salvAud ? 'Salvando...' : formAud.validado ? 'Confirmar aprovação' : 'Confirmar reprovação'}</button>
             {auds.length > 0 && <div style={{ marginTop: 24 }}><p style={{ fontSize: 13, fontWeight: 600, color: '#333', margin: '0 0 12px' }}>Histórico</p>{auds.map((log, i) => <div key={log.id} style={{ border: '1px solid #f0f0f0', borderRadius: 8, padding: '10px 14px', marginBottom: 8, borderLeft: `3px solid ${log.validado ? '#16a34a' : '#dc2626'}` }}><div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ fontSize: 12, fontWeight: 500, color: log.validado ? '#16a34a' : '#dc2626' }}>{log.validado ? '✓ Validado' : '✗ Reprovado'}{i === 0 && <span style={{ fontSize: 10, color: '#aaa', marginLeft: 8 }}>mais recente</span>}</span><span style={{ fontSize: 11, color: '#aaa' }}>{new Date(log.data_auditoria).toLocaleString('pt-BR')}</span></div><p style={{ fontSize: 12, color: '#666', margin: '4px 0 0' }}>{log.auditor_email}</p>{log.observacao && <p style={{ fontSize: 12, color: '#666', margin: '4px 0 0', fontStyle: 'italic' }}>"{log.observacao}"</p>}</div>)}</div>}
           </div>}
+
+          {/* ── HISTÓRICO ── */}
+          {aba === 'historico' && (
+            <div>
+              {loadHistorico
+                ? <p style={{ fontSize: 13, color: '#aaa' }}>Carregando...</p>
+                : historico.length === 0
+                  ? <div style={{ textAlign: 'center', padding: '40px 0', color: '#aaa' }}>
+                      <p style={{ fontSize: 28, margin: '0 0 8px' }}>📂</p>
+                      <p style={{ fontSize: 14 }}>Nenhum registro anterior encontrado.</p>
+                    </div>
+                  : historico.map((h, i) => {
+                      const aud = [...(h.logs_auditoria || [])].sort((a, b) => new Date(b.data_auditoria).getTime() - new Date(a.data_auditoria).getTime())[0]
+                      return (
+                        <div key={h.id} style={{ border: '1px solid #f0f0f0', borderRadius: 10, padding: '14px 16px', marginBottom: 10, borderLeft: '3px solid #e0e0e0' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
+                            <div>
+                              <p style={{ fontSize: 13, fontWeight: 600, color: '#333', margin: 0 }}>📅 Realizado em: {formatarData(h.data_realizacao)}</p>
+                              {h.data_vencimento && <p style={{ fontSize: 12, color: '#888', margin: '3px 0 0' }}>Vencimento: {formatarData(h.data_vencimento)}</p>}
+                            </div>
+                            {i === 0 && <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 99, backgroundColor: '#f1f5f9', color: '#64748b' }}>mais recente</span>}
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                            {h.url_arquivo
+                              ? <a href={h.url_arquivo} target="_blank" rel="noreferrer" style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#2563eb', textDecoration: 'none', padding: '4px 10px', backgroundColor: '#eff6ff', borderRadius: 6, border: '1px solid #bfdbfe' }}>
+                                  <Icone tipo="olho" cor="#2563eb" size={13} /> Ver documento
+                                </a>
+                              : <span style={{ fontSize: 12, color: '#aaa', display: 'flex', alignItems: 'center', gap: 4 }}><Icone tipo="clipe" cor="#ccc" size={13} /> Sem documento</span>}
+                            {!aud && <span style={{ fontSize: 12, color: '#aaa', display: 'flex', alignItems: 'center', gap: 4 }}><Icone tipo="relogio" cor="#ccc" size={13} /> Sem auditoria</span>}
+                            {aud?.validado && <span style={{ fontSize: 12, color: '#16a34a', display: 'flex', alignItems: 'center', gap: 4 }}><Icone tipo="check" cor="#16a34a" size={13} /> Validado</span>}
+                            {aud && !aud.validado && <span style={{ fontSize: 12, color: '#dc2626', display: 'flex', alignItems: 'center', gap: 4 }}><Icone tipo="x_circulo" cor="#dc2626" size={13} /> Reprovado</span>}
+                          </div>
+                          {aud?.observacao && <p style={{ fontSize: 12, color: '#888', margin: '8px 0 0', fontStyle: 'italic' }}>"{aud.observacao}"</p>}
+                        </div>
+                      )
+                    })
+              }
+            </div>
+          )}
+
         </div>
       </div>
     </div>
@@ -544,9 +598,7 @@ function ModalExame({ dados, abaInicial, onClose, onUpdate, email, podeAuditar, 
 }
 
 // ─── MODAL GERENCIAR COLABORADORES BASE PO ────────────────────────────────────
-function ModalGerenciarColabPO({ onClose, onUpdate }: {
-  onClose: () => void; onUpdate: () => void
-}) {
+function ModalGerenciarColabPO({ onClose, onUpdate }: { onClose: () => void; onUpdate: () => void }) {
   const [busca, setBusca] = useState('')
   const [resultados, setResultados] = useState<{ matricula: string; nome: string; na_base: boolean }[]>([])
   const [carregando, setCarregando] = useState(false)
@@ -555,101 +607,54 @@ function ModalGerenciarColabPO({ onClose, onUpdate }: {
   async function pesquisar() {
     if (!busca.trim()) return
     setCarregando(true)
-    const { data: colabs } = await supabase.from('colaboradores')
-      .select('matricula, nome')
-      .or(`nome.ilike.%${busca}%,matricula.ilike.%${busca}%`)
-      .not('situacao', 'in', '("DEMITIDO","AF.PREVIDÊNCIA","LICENÇA MATERNIDADE")')
-      .order('nome').limit(20)
-
+    const { data: colabs } = await supabase.from('colaboradores').select('matricula, nome').or(`nome.ilike.%${busca}%,matricula.ilike.%${busca}%`).not('situacao', 'in', '("DEMITIDO","AF.PREVIDÊNCIA","LICENÇA MATERNIDADE")').order('nome').limit(20)
     if (!colabs?.length) { setResultados([]); setCarregando(false); return }
-
     const mats = colabs.map((c: any) => c.matricula)
     const { data: naBase } = await supabase.from('matriz_po').select('matricula').in('matricula', mats)
     const naBaseSet = new Set((naBase || []).map((m: any) => m.matricula))
-
-    setResultados(colabs.map((c: any) => ({
-      matricula: c.matricula,
-      nome: c.nome,
-      na_base: naBaseSet.has(c.matricula),
-    })))
+    setResultados(colabs.map((c: any) => ({ matricula: c.matricula, nome: c.nome, na_base: naBaseSet.has(c.matricula) })))
     setCarregando(false)
   }
 
   async function incluir(matricula: string) {
     setSalvando(matricula)
-    await supabase.from('matriz_po').upsert(
-      { matricula, direcao_defensiva: 'N/A', pilotagem_defensiva: 'NÃO' },
-      { onConflict: 'matricula' }
-    )
+    await supabase.from('matriz_po').upsert({ matricula, direcao_defensiva: 'N/A', pilotagem_defensiva: 'NÃO' }, { onConflict: 'matricula' })
     setResultados(r => r.map(c => c.matricula === matricula ? { ...c, na_base: true } : c))
-    setSalvando(null)
-    onUpdate()
+    setSalvando(null); onUpdate()
   }
 
   async function excluir(matricula: string) {
     setSalvando(matricula)
     await supabase.from('matriz_po').delete().eq('matricula', matricula)
     setResultados(r => r.map(c => c.matricula === matricula ? { ...c, na_base: false } : c))
-    setSalvando(null)
-    onUpdate()
+    setSalvando(null); onUpdate()
   }
 
   return (
     <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 300 }}>
       <div style={{ backgroundColor: 'white', borderRadius: 16, padding: 28, width: '100%', maxWidth: 540, maxHeight: '80vh', display: 'flex', flexDirection: 'column', boxShadow: '0 20px 60px rgba(0,0,0,0.2)' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-          <div>
-            <h2 style={{ fontSize: 16, fontWeight: 600, color: '#1a1a1a', margin: 0 }}>Gerenciar Colaboradores</h2>
-            <p style={{ fontSize: 12, color: '#888', margin: '3px 0 0' }}>Incluir ou remover colaboradores da BASE PO</p>
-          </div>
+          <div><h2 style={{ fontSize: 16, fontWeight: 600, color: '#1a1a1a', margin: 0 }}>Gerenciar Colaboradores</h2><p style={{ fontSize: 12, color: '#888', margin: '3px 0 0' }}>Incluir ou remover colaboradores da BASE PO</p></div>
           <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: '#aaa' }}>✕</button>
         </div>
-
         <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
-          <input
-            type="text" value={busca}
-            onChange={e => setBusca(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && pesquisar()}
-            placeholder="Buscar por nome ou matrícula..."
-            style={{ flex: 1, height: 38, border: '1px solid #e0e0e0', borderRadius: 8, padding: '0 12px', fontSize: 13, outline: 'none' }}
-          />
-          <button onClick={pesquisar} disabled={carregando} style={{ height: 38, padding: '0 18px', backgroundColor: COR, color: 'white', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 500, cursor: carregando ? 'not-allowed' : 'pointer', opacity: carregando ? 0.7 : 1 }}>
-            {carregando ? 'Buscando...' : 'Buscar'}
-          </button>
+          <input type="text" value={busca} onChange={e => setBusca(e.target.value)} onKeyDown={e => e.key === 'Enter' && pesquisar()} placeholder="Buscar por nome ou matrícula..." style={{ flex: 1, height: 38, border: '1px solid #e0e0e0', borderRadius: 8, padding: '0 12px', fontSize: 13, outline: 'none' }} />
+          <button onClick={pesquisar} disabled={carregando} style={{ height: 38, padding: '0 18px', backgroundColor: COR, color: 'white', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 500, cursor: carregando ? 'not-allowed' : 'pointer', opacity: carregando ? 0.7 : 1 }}>{carregando ? 'Buscando...' : 'Buscar'}</button>
         </div>
-
         <div style={{ flex: 1, overflowY: 'auto' }}>
-          {resultados.length === 0 && !carregando && (
-            <div style={{ textAlign: 'center', padding: '40px 0', color: '#bbb', fontSize: 13 }}>
-              Digite um nome ou matrícula e clique em Buscar
-            </div>
-          )}
+          {resultados.length === 0 && !carregando && <div style={{ textAlign: 'center', padding: '40px 0', color: '#bbb', fontSize: 13 }}>Digite um nome ou matrícula e clique em Buscar</div>}
           {resultados.map(c => (
             <div key={c.matricula} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', borderRadius: 10, marginBottom: 6, backgroundColor: c.na_base ? '#f0fdf4' : '#fafafa', border: `1px solid ${c.na_base ? '#bbf7d0' : '#e0e0e0'}` }}>
-              <div>
-                <p style={{ fontSize: 13, fontWeight: 600, color: '#1a1a1a', margin: 0 }}>{c.nome}</p>
-                <p style={{ fontSize: 12, color: '#888', margin: '2px 0 0' }}>{c.matricula}</p>
-              </div>
+              <div><p style={{ fontSize: 13, fontWeight: 600, color: '#1a1a1a', margin: 0 }}>{c.nome}</p><p style={{ fontSize: 12, color: '#888', margin: '2px 0 0' }}>{c.matricula}</p></div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 99, backgroundColor: c.na_base ? '#dcfce7' : '#f4f4f4', color: c.na_base ? '#16a34a' : '#888', fontWeight: 500 }}>
-                  {c.na_base ? '✓ Na BASE PO' : 'Fora da BASE PO'}
-                </span>
-                {c.na_base ? (
-                  <button onClick={() => excluir(c.matricula)} disabled={salvando === c.matricula}
-                    style={{ height: 32, padding: '0 14px', fontSize: 12, border: '1px solid #fca5a5', borderRadius: 8, backgroundColor: '#fef2f2', color: '#dc2626', cursor: salvando === c.matricula ? 'not-allowed' : 'pointer', opacity: salvando === c.matricula ? 0.6 : 1 }}>
-                    {salvando === c.matricula ? '...' : 'Remover'}
-                  </button>
-                ) : (
-                  <button onClick={() => incluir(c.matricula)} disabled={salvando === c.matricula}
-                    style={{ height: 32, padding: '0 14px', fontSize: 12, border: '1px solid #bbf7d0', borderRadius: 8, backgroundColor: '#f0fdf4', color: '#16a34a', cursor: salvando === c.matricula ? 'not-allowed' : 'pointer', opacity: salvando === c.matricula ? 0.6 : 1 }}>
-                    {salvando === c.matricula ? '...' : 'Incluir'}
-                  </button>
-                )}
+                <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 99, backgroundColor: c.na_base ? '#dcfce7' : '#f4f4f4', color: c.na_base ? '#16a34a' : '#888', fontWeight: 500 }}>{c.na_base ? '✓ Na BASE PO' : 'Fora da BASE PO'}</span>
+                {c.na_base
+                  ? <button onClick={() => excluir(c.matricula)} disabled={salvando === c.matricula} style={{ height: 32, padding: '0 14px', fontSize: 12, border: '1px solid #fca5a5', borderRadius: 8, backgroundColor: '#fef2f2', color: '#dc2626', cursor: salvando === c.matricula ? 'not-allowed' : 'pointer', opacity: salvando === c.matricula ? 0.6 : 1 }}>{salvando === c.matricula ? '...' : 'Remover'}</button>
+                  : <button onClick={() => incluir(c.matricula)} disabled={salvando === c.matricula} style={{ height: 32, padding: '0 14px', fontSize: 12, border: '1px solid #bbf7d0', borderRadius: 8, backgroundColor: '#f0fdf4', color: '#16a34a', cursor: salvando === c.matricula ? 'not-allowed' : 'pointer', opacity: salvando === c.matricula ? 0.6 : 1 }}>{salvando === c.matricula ? '...' : 'Incluir'}</button>}
               </div>
             </div>
           ))}
         </div>
-
         <div style={{ marginTop: 16, paddingTop: 16, borderTop: '1px solid #f0f0f0', display: 'flex', justifyContent: 'flex-end' }}>
           <button onClick={onClose} style={{ height: 38, padding: '0 20px', border: '1px solid #e0e0e0', borderRadius: 8, fontSize: 13, cursor: 'pointer', background: 'white', color: '#555' }}>Fechar</button>
         </div>
@@ -661,7 +666,7 @@ function ModalGerenciarColabPO({ onClose, onUpdate }: {
 // ─── PÁGINA PRINCIPAL ─────────────────────────────────────────────────────────
 export default function BasePOPage() {
   const router = useRouter(); const { usuario } = useAuth()
-  const podeEditar = usuario?.nivel !== 'visualizador'  // ← adicionar
+  const podeEditar = usuario?.nivel !== 'visualizador'
   const [colabs, setColabs] = useState<Colaborador[]>([])
   const [treinamentos, setTreinamentos] = useState<Treinamento[]>([])
   const [bases, setBases] = useState<Base[]>([])
@@ -673,7 +678,6 @@ export default function BasePOPage() {
   const [filtroSup, setFiltroSup] = useState('')
   const [filtroStatus, setFiltroStatus] = useState<'valido' | 'proximo' | 'vencido' | 'programado' | null>(null)
   const [modalGerenciar, setModalGerenciar] = useState(false)
-  // Filtro N/A: por padrão oculta colaboradores N/A em todas as colunas visíveis
   const [ocultarNACompleto, setOcultarNACompleto] = useState(true)
   const [compacto, setCompacto] = useState(false)
   const [colunas, setColunas] = useState<string[]>([])
@@ -681,7 +685,6 @@ export default function BasePOPage() {
   const [ordDir, setOrdDir] = useState<OrdemDirecao>('asc')
   const [modalExame, setModalExame] = useState<{ colab: Colaborador; reg: Registro | undefined; treinamento: Treinamento; abaInicial: AbaModal } | null>(null)
   const [modalNovo, setModalNovo] = useState<{ colab: Colaborador; treinamentoId?: number } | null>(null)
-  // Modal confirmar N/A → SIM
   const [modalNA, setModalNA] = useState<{ colab: Colaborador; treinamento: Treinamento } | null>(null)
 
   const supervisoresDisp = useMemo(() => [...new Set(colabs.map(c => c.supervisor).filter(Boolean) as string[])].sort(), [colabs])
@@ -707,12 +710,9 @@ export default function BasePOPage() {
     const primeiraVez = sitsP === null
     const sitsB = primeiraVez ? [] : (sitsP ?? filtroSits)
     setLoading(true)
-
     let todos: any[] = []; let from = 0; const ps = 500
     while (true) {
-      let q = supabase.from('colaboradores')
-        .select('matricula,nome,situacao,data_admissao,processo,gerencia,supervisor,bases(nome),funcoes(nome)')
-        .order('nome').range(from, from + ps - 1)
+      let q = supabase.from('colaboradores').select('matricula,nome,situacao,data_admissao,processo,gerencia,supervisor,bases(nome),funcoes(nome)').order('nome').range(from, from + ps - 1)
       if (filtroBase) q = q.eq('base_id', filtroBase)
       if (filtroSup)  q = q.eq('supervisor', filtroSup)
       if (!primeiraVez) {
@@ -722,7 +722,6 @@ export default function BasePOPage() {
       const { data: cd } = await q; if (!cd || cd.length === 0) break
       todos = [...todos, ...cd]; if (cd.length < ps) break; from += ps
     }
-
     if (primeiraVez) {
       const sitsUnicas = [...new Set(todos.map((c: any) => c.situacao).filter(Boolean))].sort() as string[]
       setSituacoesDisp(sitsUnicas)
@@ -730,24 +729,17 @@ export default function BasePOPage() {
       setFiltroSits(sitsIniciais)
       todos = todos.filter((c: any) => sitsIniciais.includes(c.situacao))
     }
-
     const matriculas = todos.map((c: any) => c.matricula)
-    
-   // Busca matriz_po em lotes de 100
     const matrizDataArr: any[] = []
     if (matriculas.length > 0) {
       const LOTE = 100
       for (let i = 0; i < matriculas.length; i += LOTE) {
         const lote = matriculas.slice(i, i + LOTE)
-        const { data: md } = await supabase.from('matriz_po')
-          .select('matricula,direcao_defensiva,pilotagem_defensiva')
-          .in('matricula', lote)
+        const { data: md } = await supabase.from('matriz_po').select('matricula,direcao_defensiva,pilotagem_defensiva').in('matricula', lote)
         if (md) matrizDataArr.push(...md)
       }
     }
     const matrizMap = Object.fromEntries(matrizDataArr.map((m: any) => [m.matricula, m]))
-
-   // Busca registros em lotes de 100 (evita truncamento do Supabase)
     const rids = ts.map(t => t.id)
     let regs: any[] = []
     if (matriculas.length > 0 && rids.length > 0) {
@@ -756,10 +748,7 @@ export default function BasePOPage() {
         const loteMats = matriculas.slice(i, i + LOTE)
         let fromReg = 0
         while (true) {
-          const { data: rd } = await supabase.from('registros_exames')
-            .select('id,matricula_colaborador,regra_id,data_realizacao,data_vencimento,url_arquivo,logs_auditoria(id,auditor_email,data_auditoria,validado,observacao),programacoes_exames(id,data_programada,observacao,criado_por,created_at)')
-            .eq('is_atual', true).in('regra_id', rids).in('matricula_colaborador', loteMats)
-            .range(fromReg, fromReg + 499)
+          const { data: rd } = await supabase.from('registros_exames').select('id,matricula_colaborador,regra_id,data_realizacao,data_vencimento,url_arquivo,logs_auditoria(id,auditor_email,data_auditoria,validado,observacao),programacoes_exames(id,data_programada,observacao,criado_por,created_at)').eq('is_atual', true).in('regra_id', rids).in('matricula_colaborador', loteMats).range(fromReg, fromReg + 499)
           if (!rd || rd.length === 0) break
           regs = [...regs, ...rd]
           if (rd.length < 500) break
@@ -769,14 +758,7 @@ export default function BasePOPage() {
     }
     setColabs(todos.map((c: any) => {
       const mz = matrizMap[c.matricula] || {}
-      return {
-        ...c,
-        direcao_defensiva: mz.direcao_defensiva || 'N/A',
-        pilotagem_defensiva: mz.pilotagem_defensiva || 'N/A',
-        registros_exames: (regs || [])
-          .filter((r: any) => r.matricula_colaborador === c.matricula)
-          .map((r: any) => ({ ...r, programacoes: r.programacoes_exames || [] }))
-      }
+      return { ...c, direcao_defensiva: mz.direcao_defensiva || 'N/A', pilotagem_defensiva: mz.pilotagem_defensiva || 'N/A', registros_exames: (regs || []).filter((r: any) => r.matricula_colaborador === c.matricula).map((r: any) => ({ ...r, programacoes: r.programacoes_exames || [] })) }
     }) as Colaborador[])
     setLoading(false)
   }
@@ -791,10 +773,7 @@ export default function BasePOPage() {
       if (busca) { const b = busca.toLowerCase(); if (!c.nome.toLowerCase().includes(b) && !c.matricula.includes(busca)) return false }
       return true
     })
-    // Filtro N/A: remove colaboradores que são N/A em todas as colunas visíveis
-    if (ocultarNACompleto) {
-      lista = lista.filter(c => !isNACompleto(c, treinamentos, colunas))
-    }
+    if (ocultarNACompleto) lista = lista.filter(c => !isNACompleto(c, treinamentos, colunas))
     return lista
   }, [colabs, busca, ocultarNACompleto, treinamentos, colunas])
 
@@ -808,30 +787,30 @@ export default function BasePOPage() {
         const r = c.registros_exames.find(r => r.regra_id === t.id); if (!r) return false
         return getStatus(r.data_vencimento) === 'valido'
       })
-     return treinamentos.some(t => {
-      if (getObrig(c, t.nome) !== 'SIM') return false
-         const r = c.registros_exames.find(r => r.regra_id === t.id)
+      return treinamentos.some(t => {
+        if (getObrig(c, t.nome) !== 'SIM') return false
+        const r = c.registros_exames.find(r => r.regra_id === t.id)
         if (filtroStatus === 'programado') {
-        if (!r) return false
-         const s = getStatus(r.data_vencimento)
-    return (s === 'proximo' || s === 'vencido') && (r.programacoes || []).some(p => p.data_programada >= hoje)
-  }
-  if (!r) return filtroStatus === 'vencido'
-  return getStatus(r.data_vencimento) === filtroStatus
-})
+          if (!r) return false
+          const s = getStatus(r.data_vencimento)
+          return (s === 'proximo' || s === 'vencido') && (r.programacoes || []).some(p => p.data_programada >= hoje)
+        }
+        if (!r) return filtroStatus === 'vencido'
+        return getStatus(r.data_vencimento) === filtroStatus
+      })
     })
   }, [semStatus, filtroStatus, treinamentos])
 
   const ordenados = useMemo(() => [...filtrados].sort((a, b) => {
     let vA = '', vB = ''
     switch (ordCol) {
-      case 'matricula':  vA = a.matricula; vB = b.matricula; break
-      case 'nome':       vA = a.nome; vB = b.nome; break
-      case 'funcao':     vA = a.funcoes?.nome || ''; vB = b.funcoes?.nome || ''; break
-      case 'processo':   vA = a.processo || ''; vB = b.processo || ''; break
-      case 'base':       vA = a.bases?.nome || ''; vB = b.bases?.nome || ''; break
-      case 'situacao':   vA = a.situacao; vB = b.situacao; break
-      case 'gerencia':   vA = a.gerencia || ''; vB = b.gerencia || ''; break
+      case 'matricula': vA = a.matricula; vB = b.matricula; break
+      case 'nome': vA = a.nome; vB = b.nome; break
+      case 'funcao': vA = a.funcoes?.nome || ''; vB = b.funcoes?.nome || ''; break
+      case 'processo': vA = a.processo || ''; vB = b.processo || ''; break
+      case 'base': vA = a.bases?.nome || ''; vB = b.bases?.nome || ''; break
+      case 'situacao': vA = a.situacao; vB = b.situacao; break
+      case 'gerencia': vA = a.gerencia || ''; vB = b.gerencia || ''; break
       case 'supervisor': vA = a.supervisor || ''; vB = b.supervisor || ''; break
       default: if (ordCol.startsWith('exame_')) {
         const id = parseInt(ordCol.replace('exame_', ''))
@@ -849,14 +828,9 @@ export default function BasePOPage() {
   const vis = (k: string) => colunas.includes(k)
   const leftNome = vis('matricula') ? COL_MATRICULA : 0
   const colsDef = [
-    { key: 'matricula',  label: 'Matrícula'  },
-    { key: 'nome',       label: 'Nome'       },
-    { key: 'funcao',     label: 'Função'     },
-    { key: 'processo',   label: 'Processo'   },
-    { key: 'base',       label: 'Base'       },
-    { key: 'situacao',   label: 'Situação'   },
-    { key: 'gerencia',   label: 'Gerência'   },
-    { key: 'supervisor', label: 'Supervisor' },
+    { key: 'matricula', label: 'Matrícula' }, { key: 'nome', label: 'Nome' }, { key: 'funcao', label: 'Função' },
+    { key: 'processo', label: 'Processo' }, { key: 'base', label: 'Base' }, { key: 'situacao', label: 'Situação' },
+    { key: 'gerencia', label: 'Gerência' }, { key: 'supervisor', label: 'Supervisor' },
     ...treinamentos.map(t => ({ key: `exame_${t.id}`, label: t.nome }))
   ]
   const padCell = compacto ? '4px 10px' : '8px 16px'; const fs = compacto ? 12 : 13
@@ -864,11 +838,9 @@ export default function BasePOPage() {
   const tdBase = (ex?: React.CSSProperties): React.CSSProperties => ({ padding: padCell, color: '#666', whiteSpace: 'nowrap', verticalAlign: 'middle', borderBottom: '1px solid #f5f5f5', borderRight: '1px solid #f0f0f0', ...ex })
   const stickyTd = (bg: string, l: number): React.CSSProperties => ({ position: 'sticky', left: l, backgroundColor: bg, zIndex: 10, borderRight: '2px solid #d0d0d0' })
 
-  // Após confirmar alteração N/A→SIM, recarrega dados e abre modal de registro
   async function handleConfirmarNA(treinamento: Treinamento, colab: Colaborador) {
     setModalNA(null)
     await buscarColabs()
-    // Pequeno delay para garantir que os dados foram atualizados
     setTimeout(() => setModalNovo({ colab, treinamentoId: treinamento.id }), 200)
   }
 
@@ -881,24 +853,24 @@ export default function BasePOPage() {
     {/* CARDS */}
     {loading || treinamentos.length === 0
       ? <div style={{ display: 'flex', gap: 12, marginBottom: 12, overflowX: 'auto', paddingBottom: 4 }}>
-        {[...Array(4)].map((_, i) => <div key={i} style={{ backgroundColor: 'white', borderRadius: 10, padding: '10px 16px', border: '1px solid #f0f0f0', minWidth: 160, flex: '1 0 160px' }}><div style={{ height: 10, backgroundColor: '#f0f0f0', borderRadius: 4, marginBottom: 8, width: '60%' }} /><div style={{ height: 24, backgroundColor: '#f0f0f0', borderRadius: 4, width: '40%' }} /></div>)}
-      </div>
+          {[...Array(4)].map((_, i) => <div key={i} style={{ backgroundColor: 'white', borderRadius: 10, padding: '10px 16px', border: '1px solid #f0f0f0', minWidth: 160, flex: '1 0 160px' }}><div style={{ height: 10, backgroundColor: '#f0f0f0', borderRadius: 4, marginBottom: 8, width: '60%' }} /><div style={{ height: 24, backgroundColor: '#f0f0f0', borderRadius: 4, width: '40%' }} /></div>)}
+        </div>
       : <div style={{ display: 'flex', gap: 12, marginBottom: 12, overflowX: 'auto', paddingBottom: 4 }}>
-        {[
-  { label: 'Colaboradores',        valor: filtrados.length, cor: '#4a4a49', status: null },
-  { label: 'Treinamentos Válidos', valor: stats.validos,    cor: '#16a34a', status: 'valido'     as const },
-  { label: 'Próx. do Vencimento',  valor: stats.proximos,   cor: '#d97706', status: 'proximo'    as const },
-  { label: 'Falta / Vencidos',     valor: stats.vencidos,   cor: '#dc2626', status: 'vencido'    as const },
-  { label: 'Programados',          valor: stats.programados, cor: '#7c3aed', status: 'programado' as const },
-].map((card, i) => {
-          const ativo = filtroStatus === card.status && card.status !== null
-          return <div key={i} onClick={() => card.status !== null && setFiltroStatus(ativo ? null : card.status)}
-            style={{ backgroundColor: ativo ? card.cor + '10' : 'white', borderRadius: 10, padding: '10px 16px', border: ativo ? `2px solid ${card.cor}` : '1px solid #f0f0f0', minWidth: 160, flex: '1 0 160px', cursor: card.status !== null ? 'pointer' : 'default', transition: 'all 0.15s ease', boxShadow: ativo ? `0 2px 8px ${card.cor}30` : 'none' }}>
-            <p style={{ fontSize: 11, color: '#888', margin: '0 0 4px' }}>{card.label}{ativo && <span style={{ marginLeft: 6, fontSize: 10, color: card.cor }}>● filtrado</span>}</p>
-            <p style={{ fontSize: 24, fontWeight: 600, color: card.cor, margin: 0 }}>{card.valor.toLocaleString('pt-BR')}</p>
-          </div>
-        })}
-      </div>}
+          {[
+            { label: 'Colaboradores', valor: filtrados.length, cor: '#4a4a49', status: null },
+            { label: 'Treinamentos Válidos', valor: stats.validos, cor: '#16a34a', status: 'valido' as const },
+            { label: 'Próx. do Vencimento', valor: stats.proximos, cor: '#d97706', status: 'proximo' as const },
+            { label: 'Falta / Vencidos', valor: stats.vencidos, cor: '#dc2626', status: 'vencido' as const },
+            { label: 'Programados', valor: stats.programados, cor: '#7c3aed', status: 'programado' as const },
+          ].map((card, i) => {
+            const ativo = filtroStatus === card.status && card.status !== null
+            return <div key={i} onClick={() => card.status !== null && setFiltroStatus(ativo ? null : card.status)}
+              style={{ backgroundColor: ativo ? card.cor + '10' : 'white', borderRadius: 10, padding: '10px 16px', border: ativo ? `2px solid ${card.cor}` : '1px solid #f0f0f0', minWidth: 160, flex: '1 0 160px', cursor: card.status !== null ? 'pointer' : 'default', transition: 'all 0.15s ease', boxShadow: ativo ? `0 2px 8px ${card.cor}30` : 'none' }}>
+              <p style={{ fontSize: 11, color: '#888', margin: '0 0 4px' }}>{card.label}{ativo && <span style={{ marginLeft: 6, fontSize: 10, color: card.cor }}>● filtrado</span>}</p>
+              <p style={{ fontSize: 24, fontWeight: 600, color: card.cor, margin: 0 }}>{card.valor.toLocaleString('pt-BR')}</p>
+            </div>
+          })}
+        </div>}
 
     {/* FILTROS */}
     <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -911,14 +883,9 @@ export default function BasePOPage() {
         <option value="">Todos os supervisores</option>{supervisoresDisp.map(s => <option key={s} value={s}>{primeiroNome(s)}</option>)}
       </select>
       {podeEditar && (
-  <button onClick={() => setModalGerenciar(true)} style={{ height: 36, padding: '0 12px', fontSize: 12, border: '1px solid #e0e0e0', borderRadius: 8, backgroundColor: 'white', color: '#555', cursor: 'pointer' }}>
-    👥 Gerenciar
-  </button>
-)}
-      {/* Toggle filtro N/A */}
-      <button
-        onClick={() => setOcultarNACompleto(v => !v)}
-        title={ocultarNACompleto ? 'N/A completos ocultos — clique para mostrar' : 'Mostrando N/A completos — clique para ocultar'}
+        <button onClick={() => setModalGerenciar(true)} style={{ height: 36, padding: '0 12px', fontSize: 12, border: '1px solid #e0e0e0', borderRadius: 8, backgroundColor: 'white', color: '#555', cursor: 'pointer' }}>👥 Gerenciar</button>
+      )}
+      <button onClick={() => setOcultarNACompleto(v => !v)} title={ocultarNACompleto ? 'N/A completos ocultos — clique para mostrar' : 'Mostrando N/A completos — clique para ocultar'}
         style={{ height: 36, padding: '0 12px', fontSize: 12, border: `1px solid ${ocultarNACompleto ? '#e0e0e0' : COR}`, borderRadius: 8, backgroundColor: ocultarNACompleto ? 'white' : '#fdf2f5', color: ocultarNACompleto ? '#555' : COR, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap' }}>
         {ocultarNACompleto ? '⊘ Ocultar N/A' : '◉ Mostrar N/A'}
       </button>
@@ -957,11 +924,11 @@ export default function BasePOPage() {
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                       <span style={{ fontWeight: 500, color: '#333', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: COL_NOME - 40 }}>{c.nome}</span>
                       {podeEditar && (
-                      <button title="Novo registro" onClick={e => { e.stopPropagation(); setModalNovo({ colab: c }) }}
-                       style={{ width: 20, height: 20, borderRadius: '50%', backgroundColor: '#f0f0f0', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, color: '#888', flexShrink: 0, lineHeight: 1 }}
-                        onMouseEnter={e => { e.currentTarget.style.backgroundColor = '#fdf2f5'; e.currentTarget.style.color = COR }}
-                        onMouseLeave={e => { e.currentTarget.style.backgroundColor = '#f0f0f0'; e.currentTarget.style.color = '#888' }}>+</button>
-)}
+                        <button title="Novo registro" onClick={e => { e.stopPropagation(); setModalNovo({ colab: c }) }}
+                          style={{ width: 20, height: 20, borderRadius: '50%', backgroundColor: '#f0f0f0', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, color: '#888', flexShrink: 0, lineHeight: 1 }}
+                          onMouseEnter={e => { e.currentTarget.style.backgroundColor = '#fdf2f5'; e.currentTarget.style.color = COR }}
+                          onMouseLeave={e => { e.currentTarget.style.backgroundColor = '#f0f0f0'; e.currentTarget.style.color = '#888' }}>+</button>
+                      )}
                     </div>
                   </td>}
                   {vis('funcao')     && <td style={tdBase()}>{c.funcoes?.nome || '—'}</td>}
@@ -987,15 +954,8 @@ export default function BasePOPage() {
 
     {/* MODAIS */}
     {modalExame && <ModalExame dados={modalExame} abaInicial={modalExame.abaInicial} onClose={() => setModalExame(null)} onUpdate={() => buscarColabs(treinamentos)} email={usuario?.email || ''} podeAuditar={usuario?.pode_auditar || false} nivel={usuario?.nivel || 'visualizador'} />}
-    {modalNovo && <ModalNovoExame colab={modalNovo.colab} treinamentos={treinamentos} treinamentoPreSelecionado={modalNovo.treinamentoId} onClose={() => setModalNovo(null)} onUpdate={() => buscarColabs(treinamentos)} email={usuario?.email || ''} />}
+    {modalNovo && podeEditar && <ModalNovoExame colab={modalNovo.colab} treinamentos={treinamentos} treinamentoPreSelecionado={modalNovo.treinamentoId} onClose={() => setModalNovo(null)} onUpdate={() => buscarColabs(treinamentos)} email={usuario?.email || ''} />}
     {modalNA && <ModalConfirmarNA colab={modalNA.colab} treinamento={modalNA.treinamento} onClose={() => setModalNA(null)} onConfirmar={() => handleConfirmarNA(modalNA.treinamento, modalNA.colab)} />}
-    {modalGerenciar && (
-  <ModalGerenciarColabPO 
-    onClose={() => setModalGerenciar(false)} 
-    onUpdate={async () => {
-      await buscarColabs(treinamentos, null)
-    }} 
-  />
-)}
+    {modalGerenciar && <ModalGerenciarColabPO onClose={() => setModalGerenciar(false)} onUpdate={async () => { await buscarColabs(treinamentos, null) }} />}
   </div>
 }
