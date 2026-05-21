@@ -7,10 +7,10 @@ import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/lib/auth-context'
 
 import { 
-  LayoutDashboard, LayoutGrid, HeartPulse, Users, 
+  BarChart2, LayoutGrid, HeartPulse, Users, 
   ClipboardCheck, Settings, ChevronLeft, ChevronRight, 
   ChevronDown, MoreHorizontal, User, Key, LogOut, X, 
-  CheckCircle2, Circle, CreditCard
+  CheckCircle2, Circle, CreditCard, FileText
 } from 'lucide-react'
 
 // ─── CORES E ESTILOS GERAIS ──────────────────────────────────────────────────
@@ -21,7 +21,8 @@ const COR_TEXTO_SECUNDARIO = '#64748b'
 const COR_BORDA = '#e2e8f0'
 
 const MAPA_ICONES: Record<string, React.ElementType> = {
-  '/dashboard': LayoutDashboard,
+  '/dashboard': BarChart2,
+  '/gerar-aso': FileText,
   '/colaboradores': Users,
   '/auditoria': ClipboardCheck,
   '/matriz-competencias': LayoutGrid,
@@ -290,6 +291,7 @@ export default function Sidebar() {
       ],
     },
     { label: 'Medicina do Trabalho',   href: '/med-trab',             niveis: [] as string[],                        modulo: 'medicina' },
+    { label: 'Gerar ASO',              href: '/gerar-aso',            niveis: [] as string[],                        modulo: 'gerar_aso' },
     { label: 'CNH',                    href: '/cnh',                  niveis: ['admin', 'operador'],                 modulo: null },
     { label: 'Colaboradores',          href: '/colaboradores',        niveis: ['admin', 'operador'],                 modulo: null },
     { label: 'Auditoria',              href: '/auditoria',            niveis: ['admin', 'operador'],                 modulo: null },
@@ -300,7 +302,8 @@ const itensFiltrados = carregando
   ? []
   : usuario
     ? todosItens.filter(item => {
-        if (item.modulo) return usuario.nivel === 'admin' || (usuario.modulos_acesso || []).includes(item.modulo)
+        if (usuario.nivel === 'admin') return true
+        if (item.modulo) return (usuario.modulos_acesso || []).includes(item.modulo)
         return item.niveis.includes(usuario.nivel)
       })
     : []
@@ -382,7 +385,7 @@ const itensFiltrados = carregando
         )}
 
         {itensFiltrados.map((item) => {
-          const IconeLucide = MAPA_ICONES[item.href] || LayoutDashboard
+        const IconeLucide = MAPA_ICONES[item.href] || BarChart2
 
           if (item.filhos) {
             const estaExpandido = expandido === item.href

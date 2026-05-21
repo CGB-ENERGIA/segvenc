@@ -19,8 +19,10 @@ interface TipoExameMedico { id: number; nome: string }
 interface GSEExame { id: number; gse_id: number; tipo_exame_medico_id: number; no_adm: boolean; no_per: boolean; no_ret: boolean; no_mro: boolean; no_dem: boolean; tipos_exame_medico?: { nome: string } | null }
 interface Supervisor { id: number; nome: string }
 interface MatrizNR { id: string; funcao: string; processo: string | null; treinamento: string; obrigatorio: string }
+interface ConfigEmpresa { id: number; razao_social: string; cnpj: string; cnae: string; grau_risco: string; endereco: string; numero: string; bairro: string; cidade: string; uf: string; telefone: string }
+interface MedicoASO { id: number; nome: string; crm: string; rqe: string; especialidade: string; telefone: string; ativo: boolean; created_at: string }
 
-type Aba = 'usuarios' | 'bases' | 'funcoes' | 'tipos_exame' | 'gerencias' | 'gse' | 'supervisores' | 'obrigatoriedade_nr'
+type Aba = 'usuarios' | 'bases' | 'funcoes' | 'tipos_exame' | 'gerencias' | 'gse' | 'supervisores' | 'obrigatoriedade_nr' | 'empresa' | 'medicos'
 
 // ─── CONSTANTES ───────────────────────────────────────────────────────────────
 const MODULOS = [
@@ -30,6 +32,7 @@ const MODULOS = [
   { chave: 'medicina', label: 'Medicina do Trabalho' },
   { chave: 'auditoria', label: 'Auditoria' },
   { chave: 'configuracoes', label: 'Configurações' },
+  { chave: 'gerar_aso', label: 'Gerar ASO' }
 ]
 const NRS_ALVO = ['NR 10-B', 'NR 11', 'NR 12 - II', 'NR 12 - V', 'NR 12 - XII', 'NR 35']
 
@@ -698,6 +701,184 @@ function AbaObrigatoriedadeNR() {
   )
 }
 
+// ─── ABA EMPRESA ─────────────────────────────────────────────────────────────
+function AbaEmpresa() {
+  const [empresa, setEmpresa] = useState<ConfigEmpresa | null>(null)
+  const [carregando, setCarregando] = useState(true)
+  const [editando, setEditando] = useState(false)
+  const [salvando, setSalvando] = useState(false)
+  const [form, setForm] = useState({ razao_social: '', cnpj: '', cnae: '', grau_risco: '', endereco: '', numero: '', bairro: '', cidade: '', uf: '', telefone: '' })
+
+  useEffect(() => { carregar() }, [])
+
+  async function carregar() {
+    setCarregando(true)
+    const { data } = await supabase.from('configuracoes_empresa').select('*').limit(1).single()
+    if (data) { setEmpresa(data); setForm({ razao_social: data.razao_social || '', cnpj: data.cnpj || '', cnae: data.cnae || '', grau_risco: data.grau_risco || '', endereco: data.endereco || '', numero: data.numero || '', bairro: data.bairro || '', cidade: data.cidade || '', uf: data.uf || '', telefone: data.telefone || '' }) }
+    setCarregando(false)
+  }
+
+  async function salvar() {
+    setSalvando(true)
+    if (empresa) {
+      await supabase.from('configuracoes_empresa').update(form).eq('id', empresa.id)
+    } else {
+      await supabase.from('configuracoes_empresa').insert(form)
+    }
+    setSalvando(false); setEditando(false); carregar()
+  }
+
+  if (carregando) return <p style={{ color: '#888', fontSize: 14 }}>Carregando...</p>
+
+  return (
+    <div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+        <p style={{ fontSize: 13, color: '#888', margin: 0 }}>Dados da empresa exibidos no ASO</p>
+        {!editando && <button style={btnPrimario} onClick={() => setEditando(true)}>✏️ Editar</button>}
+      </div>
+
+      {!editando ? (
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+          {[
+            { label: 'Razão Social', value: empresa?.razao_social },
+            { label: 'CNPJ', value: empresa?.cnpj },
+            { label: 'CNAE', value: empresa?.cnae },
+            { label: 'Grau de Risco', value: empresa?.grau_risco },
+            { label: 'Endereço', value: empresa?.endereco },
+            { label: 'Número', value: empresa?.numero },
+            { label: 'Bairro', value: empresa?.bairro },
+            { label: 'Cidade', value: empresa?.cidade },
+            { label: 'UF', value: empresa?.uf },
+            { label: 'Telefone', value: empresa?.telefone },
+          ].map(item => (
+            <div key={item.label} style={{ backgroundColor: '#f9f9f9', borderRadius: 10, padding: '12px 16px', border: '1px solid #f0f0f0' }}>
+              <p style={{ fontSize: 11, color: '#888', margin: '0 0 4px', fontWeight: 500 }}>{item.label}</p>
+              <p style={{ fontSize: 14, color: '#333', margin: 0, fontWeight: 500 }}>{item.value || <span style={{ color: '#ccc' }}>—</span>}</p>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+            <div style={{ gridColumn: '1 / -1' }}><label style={labelStyle}>Razão Social</label><input style={inputStyle} value={form.razao_social} onChange={e => setForm(f => ({ ...f, razao_social: e.target.value }))} /></div>
+            <div><label style={labelStyle}>CNPJ</label><input style={inputStyle} value={form.cnpj} onChange={e => setForm(f => ({ ...f, cnpj: e.target.value }))} placeholder="00.000.000/0000-00" /></div>
+            <div><label style={labelStyle}>CNAE</label><input style={inputStyle} value={form.cnae} onChange={e => setForm(f => ({ ...f, cnae: e.target.value }))} placeholder="0000-0/00" /></div>
+            <div><label style={labelStyle}>Grau de Risco</label><select style={inputStyle} value={form.grau_risco} onChange={e => setForm(f => ({ ...f, grau_risco: e.target.value }))}><option value="">Selecione...</option>{['1','2','3','4'].map(g => <option key={g} value={g}>{g}</option>)}</select></div>
+            <div><label style={labelStyle}>Telefone</label><input style={inputStyle} value={form.telefone} onChange={e => setForm(f => ({ ...f, telefone: e.target.value }))} placeholder="(00) 0000-0000" /></div>
+            <div style={{ gridColumn: '1 / -1' }}><label style={labelStyle}>Endereço</label><input style={inputStyle} value={form.endereco} onChange={e => setForm(f => ({ ...f, endereco: e.target.value }))} /></div>
+            <div><label style={labelStyle}>Número</label><input style={inputStyle} value={form.numero} onChange={e => setForm(f => ({ ...f, numero: e.target.value }))} /></div>
+            <div><label style={labelStyle}>Bairro</label><input style={inputStyle} value={form.bairro} onChange={e => setForm(f => ({ ...f, bairro: e.target.value }))} /></div>
+            <div><label style={labelStyle}>Cidade</label><input style={inputStyle} value={form.cidade} onChange={e => setForm(f => ({ ...f, cidade: e.target.value }))} /></div>
+            <div><label style={labelStyle}>UF</label><input style={{ ...inputStyle, maxWidth: 80 }} value={form.uf} onChange={e => setForm(f => ({ ...f, uf: e.target.value.toUpperCase() }))} maxLength={2} /></div>
+          </div>
+          <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end', marginTop: 8 }}>
+            <button style={btnSecundario} onClick={() => setEditando(false)}>Cancelar</button>
+            <button style={{ ...btnPrimario, opacity: salvando ? 0.7 : 1 }} onClick={salvar} disabled={salvando}>{salvando ? 'Salvando...' : 'Salvar'}</button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ─── ABA MÉDICOS ──────────────────────────────────────────────────────────────
+function AbaMedicos() {
+  const [medicos, setMedicos] = useState<MedicoASO[]>([])
+  const [carregando, setCarregando] = useState(true)
+  const [modal, setModal] = useState<'novo' | 'editar' | null>(null)
+  const [selecionado, setSelecionado] = useState<MedicoASO | null>(null)
+  const [salvando, setSalvando] = useState(false)
+  const [form, setForm] = useState({ nome: '', crm: '', rqe: '', especialidade: '', telefone: '', ativo: true })
+
+  useEffect(() => { carregar() }, [])
+  async function carregar() { setCarregando(true); const { data } = await supabase.from('medicos_aso').select('*').order('created_at', { ascending: false }); setMedicos(data || []); setCarregando(false) }
+  function abrirNovo() { setForm({ nome: '', crm: '', rqe: '', especialidade: '', telefone: '', ativo: true }); setSelecionado(null); setModal('novo') }
+  function abrirEditar(m: MedicoASO) { setSelecionado(m); setForm({ nome: m.nome, crm: m.crm || '', rqe: m.rqe || '', especialidade: m.especialidade || '', telefone: m.telefone || '', ativo: m.ativo }); setModal('editar') }
+
+  async function salvar() {
+    if (!form.nome) return
+    setSalvando(true)
+    if (modal === 'novo') {
+      // Se novo médico for ativo, desativa os demais
+      if (form.ativo) await supabase.from('medicos_aso').update({ ativo: false }).eq('ativo', true)
+      await supabase.from('medicos_aso').insert(form)
+    } else if (selecionado) {
+      if (form.ativo) await supabase.from('medicos_aso').update({ ativo: false }).neq('id', selecionado.id)
+      await supabase.from('medicos_aso').update(form).eq('id', selecionado.id)
+    }
+    setSalvando(false); setModal(null); carregar()
+  }
+
+  async function ativar(m: MedicoASO) {
+    await supabase.from('medicos_aso').update({ ativo: false }).eq('ativo', true)
+    await supabase.from('medicos_aso').update({ ativo: true }).eq('id', m.id)
+    carregar()
+  }
+
+  return (
+    <div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+        <p style={{ fontSize: 13, color: '#888', margin: 0 }}>{medicos.length} médico{medicos.length !== 1 ? 's' : ''} cadastrado{medicos.length !== 1 ? 's' : ''} · O médico <strong>ativo</strong> será usado no ASO</p>
+        <button style={btnPrimario} onClick={abrirNovo}>+ Novo Médico</button>
+      </div>
+      {carregando ? <p style={{ color: '#888', fontSize: 14 }}>Carregando...</p> : (
+        <div style={{ borderRadius: 12, border: '1px solid #f0f0f0', overflow: 'hidden' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', backgroundColor: 'white', fontSize: 13 }}>
+            <thead><tr style={{ backgroundColor: '#fafafa', borderBottom: '1px solid #f0f0f0' }}>
+              {['Nome', 'CRM', 'RQE', 'Especialidade', 'Telefone', 'Status', 'Ações'].map(h => <th key={h} style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 500, color: '#555' }}>{h}</th>)}
+            </tr></thead>
+            <tbody>
+              {medicos.length === 0
+                ? <tr><td colSpan={7} style={{ padding: '32px 16px', textAlign: 'center', color: '#aaa', fontSize: 13 }}>Nenhum médico cadastrado.</td></tr>
+                : medicos.map((m, i) => (
+                  <tr key={m.id} style={{ borderBottom: '1px solid #f5f5f5', backgroundColor: m.ativo ? '#f0fdf4' : (i % 2 === 0 ? 'white' : '#fafafa') }}>
+                    <td style={{ padding: '10px 16px', fontWeight: 600, color: '#333' }}>{m.nome}</td>
+                    <td style={{ padding: '10px 16px', color: '#666' }}>{m.crm || '—'}</td>
+                    <td style={{ padding: '10px 16px', color: '#666' }}>{m.rqe || '—'}</td>
+                    <td style={{ padding: '10px 16px', color: '#666' }}>{m.especialidade || '—'}</td>
+                    <td style={{ padding: '10px 16px', color: '#666' }}>{m.telefone || '—'}</td>
+                    <td style={{ padding: '10px 16px' }}>
+                      <span style={{ fontSize: 11, padding: '2px 10px', borderRadius: 99, backgroundColor: m.ativo ? '#dcfce7' : '#f1f5f9', color: m.ativo ? '#15803d' : '#94a3b8', fontWeight: 600 }}>
+                        {m.ativo ? '● Ativo' : 'Inativo'}
+                      </span>
+                    </td>
+                    <td style={{ padding: '10px 16px' }}>
+                      <div style={{ display: 'flex', gap: 8 }}>
+                        <button style={btnSecundario} onClick={() => abrirEditar(m)}>Editar</button>
+                        {!m.ativo && <button style={{ ...btnPrimario, padding: '6px 12px', fontSize: 12 }} onClick={() => ativar(m)}>Ativar</button>}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {(modal === 'novo' || modal === 'editar') && (
+        <Modal titulo={modal === 'novo' ? 'Novo Médico' : 'Editar Médico'} onFechar={() => setModal(null)}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <div style={{ gridColumn: '1 / -1' }}><label style={labelStyle}>Nome completo *</label><input style={inputStyle} value={form.nome} onChange={e => setForm(f => ({ ...f, nome: e.target.value }))} placeholder="Ex: DR. JOÃO DA SILVA" autoFocus /></div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <div><label style={labelStyle}>CRM</label><input style={inputStyle} value={form.crm} onChange={e => setForm(f => ({ ...f, crm: e.target.value }))} placeholder="Ex: 1844-PA" /></div>
+              <div><label style={labelStyle}>RQE</label><input style={inputStyle} value={form.rqe} onChange={e => setForm(f => ({ ...f, rqe: e.target.value }))} placeholder="Ex: 6709" /></div>
+              <div><label style={labelStyle}>Especialidade</label><input style={inputStyle} value={form.especialidade} onChange={e => setForm(f => ({ ...f, especialidade: e.target.value }))} placeholder="Ex: MÉDICO DO TRABALHO" /></div>
+              <div><label style={labelStyle}>Telefone</label><input style={inputStyle} value={form.telefone} onChange={e => setForm(f => ({ ...f, telefone: e.target.value }))} placeholder="(00) 00000-0000" /></div>
+            </div>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: '#555', cursor: 'pointer' }}>
+              <input type="checkbox" checked={form.ativo} onChange={e => setForm(f => ({ ...f, ativo: e.target.checked }))} style={{ accentColor: cor }} />
+              Definir como médico ativo <span style={{ fontSize: 11, color: '#aaa' }}>(será usado no ASO)</span>
+            </label>
+            <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end', marginTop: 8 }}>
+              <button style={btnSecundario} onClick={() => setModal(null)}>Cancelar</button>
+              <button style={{ ...btnPrimario, opacity: salvando ? 0.7 : 1 }} onClick={salvar} disabled={salvando}>{salvando ? 'Salvando...' : 'Salvar'}</button>
+            </div>
+          </div>
+        </Modal>
+      )}
+    </div>
+  )
+}
+
 // ─── PÁGINA PRINCIPAL ─────────────────────────────────────────────────────────
 export default function ConfiguracoesPage() {
   const router = useRouter()
@@ -728,6 +909,8 @@ export default function ConfiguracoesPage() {
     { key: 'supervisores', label: 'Supervisores', descricao: 'Cadastro de supervisores' },
     { key: 'gse', label: 'GSE', descricao: 'Grupos Similares de Exposição — funções e exames por tipo de ASO' },
     { key: 'obrigatoriedade_nr', label: 'Obrigatoriedade NR', descricao: 'Funções obrigadas por norma regulamentadora' },
+    { key: 'empresa', label: 'Empresa', descricao: 'Dados da empresa exibidos no ASO' },
+    { key: 'medicos', label: 'Médicos', descricao: 'Médicos responsáveis pelo PCMSO' },
   ]
 
   const abaInfo = abas.find(a => a.key === abaAtiva)!
@@ -751,6 +934,8 @@ export default function ConfiguracoesPage() {
       {abaAtiva === 'supervisores' && <AbaSupervisores />}
       {abaAtiva === 'gse' && <AbaGSE />}
       {abaAtiva === 'obrigatoriedade_nr' && <AbaObrigatoriedadeNR />}
+      {abaAtiva === 'empresa' && <AbaEmpresa />}
+      {abaAtiva === 'medicos' && <AbaMedicos />}
     </div>
   )
 }

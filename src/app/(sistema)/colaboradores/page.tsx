@@ -1,70 +1,98 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/lib/auth-context'
 
 interface Colaborador {
-  matricula: string
-  nome: string
-  funcoes: { nome: string } | null
-  funcao_id: number | null
-  gse: number | null
-  base_id: number | null
-  gerencia_id: number | null
-  contato: string | null
-  processo: string | null
-  data_admissao: string | null
-  data_demissao: string | null
-  email_corporativo: string | null
-  situacao: string
-  gerencia: string | null
-  supervisor: string | null
-  bases: { nome: string } | null
+  matricula: string; nome: string; funcoes: { nome: string } | null; funcao_id: number | null
+  gse: number | null; base_id: number | null; gerencia_id: number | null
+  contato: string | null; processo: string | null; data_admissao: string | null
+  data_demissao: string | null; email_corporativo: string | null; situacao: string
+  gerencia: string | null; supervisor: string | null; bases: { nome: string } | null; sexo: string | null
 }
-
 interface Base { id: number; nome: string }
 interface Funcao { id: number; nome: string }
-interface Gerencia {
-  id: number
-  sigla: string
-  nome: string
-  gerente_matricula: string | null
-}
+interface Gerencia { id: number; sigla: string; nome: string; gerente_matricula: string | null }
 interface Supervisor { id: number; nome: string }
+interface DiffCampo { campo: string; label: string; antigo: string | null; novo: string | null }
+interface DiffImport {
+  matricula: string; nome: string; tipo: 'novo' | 'atualizacao'
+  campos: DiffCampo[]; dados: any; selecionado: boolean
+  cnh?: { numero: string | null; categoria: string | null; vencimento: string | null }
+}
 
-type OrdemColuna = 'nome' | 'matricula' | 'funcao' | 'processo' | 'base' | 'gerencia' |  'supervisor' | 'admissao' |  'demissao' | 'situacao' 
+type OrdemColuna = 'nome' | 'matricula' | 'funcao' | 'processo' | 'base' | 'gerencia' | 'supervisor' | 'admissao' | 'demissao' | 'situacao'
 type OrdemDirecao = 'asc' | 'desc'
 type FiltroCard = 'ATIVO' | 'AF.PREVIDÊNCIA' | 'FÉRIAS' | 'AVISO PRÉVIO' | 'LICENÇA MATERNIDADE' | 'DEMITIDO' | null
 
 const SITUACOES = ['ATIVO', 'AF.PREVIDÊNCIA', 'AVISO PRÉVIO', 'FÉRIAS', 'LICENÇA MATERNIDADE', 'DEMITIDO']
 const POR_PAGINA = 50
 const COR = '#9f183c'
+const PROCESSOS = ['Administrativo','Almoxarifado','Construção','Corte e Religação','Frota','Inspeção','Ligação Nova','Linha Viva','Manutenção','Plantão','Poda','Qualidade e Equipamentos','Seed Money','Segurança','Tat','Transporte']
 
-// ─── TH ORDENÁVEL ────────────────────────────────────────────────────────────
+// ─── HELPERS ──────────────────────────────────────────────────────────────────
+function parseDateBR(val: any): string | null {
+  if (!val) return null
+  if (typeof val === 'number') {
+    const d = new Date(Math.round((val - 25569) * 86400 * 1000))
+    return d.toISOString().split('T')[0]
+  }
+  if (typeof val === 'string') {
+    const m = val.trim().match(/^(\d{2})\/(\d{2})\/(\d{4})$/)
+    if (m) return `${m[3]}-${m[2]}-${m[1]}`
+    if (/^\d{4}-\d{2}-\d{2}$/.test(val.trim())) return val.trim()
+  }
+  return null
+}
+function mapSituacao(val: string): string {
+  const v = (val || '').trim().toUpperCase()
+  if (v === 'ATIVO' || v === 'ATIVA') return 'ATIVO'
+  if (v === 'DEMITIDO' || v === 'DEMITIDA') return 'DEMITIDO'
+  if (v.includes('FÉRIAS') || v.includes('FERIAS')) return 'FÉRIAS'
+  if (v.includes('PREVIDÊNCIA') || v.includes('PREVIDENCIA')) return 'AF.PREVIDÊNCIA'
+  if (v.includes('AVISO')) return 'AVISO PRÉVIO'
+  if (v.includes('MATERNIDADE')) return 'LICENÇA MATERNIDADE'
+  return v
+}
+function fmtData(d: string | null) { if (!d) return '—'; return new Date(d + 'T12:00:00').toLocaleDateString('pt-BR') }
 
-function ThOrdenavel({ label, coluna, ordemAtual, direcao, onClick, style }: {
-  label: string; coluna: OrdemColuna; ordemAtual: OrdemColuna
-  direcao: OrdemDirecao; onClick: (col: OrdemColuna) => void; style?: React.CSSProperties
-}) {
+// ─── TH ORDENÁVEL ─────────────────────────────────────────────────────────────
+function ThOrdenavel({ label, coluna, ordemAtual, direcao, onClick, style }: { label: string; coluna: OrdemColuna; ordemAtual: OrdemColuna; direcao: OrdemDirecao; onClick: (col: OrdemColuna) => void; style?: React.CSSProperties }) {
   const ativo = ordemAtual === coluna
   return (
-    <th onClick={() => onClick(coluna)} style={{
-      padding: '10px 16px', textAlign: 'left', fontWeight: 700,
-      color: ativo ? COR : '#333', whiteSpace: 'nowrap',
-      cursor: 'pointer', userSelect: 'none',
-      borderBottom: ativo ? `2px solid ${COR}` : '2px solid transparent',
-      position: 'sticky', top: 0, backgroundColor: '#fafafa', zIndex: 3,
-      ...style,
-    }}>
+    <th onClick={() => onClick(coluna)} style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 700, color: ativo ? COR : '#333', whiteSpace: 'nowrap', cursor: 'pointer', userSelect: 'none', borderBottom: ativo ? `2px solid ${COR}` : '2px solid transparent', position: 'sticky', top: 0, backgroundColor: '#fafafa', zIndex: 3, ...style }}>
       {label} {ativo ? (direcao === 'asc' ? '↑' : '↓') : <span style={{ color: '#ccc' }}>↕</span>}
     </th>
   )
 }
 
-// ─── PÁGINA PRINCIPAL ─────────────────────────────────────────────────────────
+// ─── BOTÃO EXPORTAR ───────────────────────────────────────────────────────────
+function BotaoExportar({ onClick }: { onClick: (t: 'csv' | 'xlsx') => void }) {
+  const [open, setOpen] = useState(false); const ref = useRef<HTMLDivElement>(null)
+  useEffect(() => { const h = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false) }; document.addEventListener('mousedown', h); return () => document.removeEventListener('mousedown', h) }, [])
+  return (
+    <div ref={ref} style={{ position: 'relative' }}>
+      <button onClick={() => setOpen(!open)} style={{ height: 36, padding: '0 14px', fontSize: 13, border: '1px solid #e0e0e0', borderRadius: 8, backgroundColor: 'white', color: '#555', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}>
+        📥 Exportar <span style={{ fontSize: 10 }}>{open ? '▲' : '▼'}</span>
+      </button>
+      {open && (
+        <div style={{ position: 'absolute', top: 40, right: 0, zIndex: 150, backgroundColor: 'white', border: '1px solid #e0e0e0', borderRadius: 10, boxShadow: '0 8px 24px rgba(0,0,0,0.12)', width: 180, overflow: 'hidden' }}>
+          {(['csv', 'xlsx'] as const).map((t, i) => (
+            <button key={t} onClick={() => { onClick(t); setOpen(false) }} style={{ width: '100%', padding: '10px 16px', fontSize: 13, textAlign: 'left', border: 'none', background: 'none', cursor: 'pointer', color: '#333', borderTop: i > 0 ? '1px solid #f0f0f0' : 'none' }}
+              onMouseEnter={e => e.currentTarget.style.backgroundColor = '#f9f9f9'}
+              onMouseLeave={e => e.currentTarget.style.backgroundColor = 'transparent'}>
+              {t === 'csv' ? '📄 Exportar CSV' : '📊 Exportar Excel'}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
 
+// ─── PÁGINA PRINCIPAL ─────────────────────────────────────────────────────────
 export default function ColaboradoresPage() {
   const router = useRouter()
   const { usuario } = useAuth()
@@ -82,134 +110,91 @@ export default function ColaboradoresPage() {
   const [filtroCard, setFiltroCard] = useState<FiltroCard>(null)
   const [pagina, setPagina] = useState(1)
   const [total, setTotal] = useState(0)
+  const [statsTotal, setStatsTotal] = useState(0); const [statsAtivo, setStatsAtivo] = useState(0)
+  const [statsAfastado, setStatsAfastado] = useState(0); const [statsFerias, setStatsFerias] = useState(0)
+  const [statsAviso, setStatsAviso] = useState(0); const [statsLicenca, setStatsLicenca] = useState(0)
+  const [statsDemitido, setStatsDemitido] = useState(0); const [carregandoStats, setCarregandoStats] = useState(true)
+  const [modalAberto, setModalAberto] = useState(false); const [salvando, setSalvando] = useState(false)
+  const [erro, setErro] = useState<string | null>(null); const [ordemColuna, setOrdemColuna] = useState<OrdemColuna>('nome')
+  const [ordemDirecao, setOrdemDirecao] = useState<OrdemDirecao>('asc'); const [editando, setEditando] = useState<string | null>(null)
+  const [modalExcluirAberto, setModalExcluirAberto] = useState(false); const [confirmacaoMatricula, setConfirmacaoMatricula] = useState('')
+  const [excluindo, setExcluindo] = useState(false); const [erroExcluir, setErroExcluir] = useState<string | null>(null)
+  const [form, setForm] = useState({ matricula: '', nome: '', funcao_id: '', base_id: '', gerencia: '', contato: '', processo: '', supervisor: '', data_admissao: '', data_demissao: '', email_corporativo: '', situacao: 'ATIVO', gse: '', sexo: '' })
 
-  const [statsTotal, setStatsTotal] = useState(0)
-  const [statsAtivo, setStatsAtivo] = useState(0)
-  const [statsAfastado, setStatsAfastado] = useState(0)
-  const [statsFerias, setStatsFerias] = useState(0)
-  const [statsAviso, setStatsAviso] = useState(0)
-  const [statsLicenca, setStatsLicenca] = useState(0)
-  const [statsDemitido, setStatsDemitido] = useState(0)
-  const [carregandoStats, setCarregandoStats] = useState(true)
+  // ─── IMPORT STATE ───────────────────────────────────────────────────────────
+  const [importModal, setImportModal] = useState(false)
+  const [importStep, setImportStep] = useState<1 | 2>(1)
+  const [importDiffs, setImportDiffs] = useState<DiffImport[]>([])
+  const [importProcessando, setImportProcessando] = useState(false)
+  const [importSalvando, setImportSalvando] = useState(false)
+  const [importErro, setImportErro] = useState<string | null>(null)
+  const [importLog, setImportLog] = useState<string[]>([])
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
-  const [modalAberto, setModalAberto] = useState(false)
-  const [salvando, setSalvando] = useState(false)
-  const [erro, setErro] = useState<string | null>(null)
-  const [ordemColuna, setOrdemColuna] = useState<OrdemColuna>('nome')
-  const [ordemDirecao, setOrdemDirecao] = useState<OrdemDirecao>('asc')
-  const [form, setForm] = useState({
-  matricula: '', nome: '', funcao_id: '', base_id: '',
-  gerencia: '', contato: '', processo: '', supervisor: '',
-  data_admissao: '', data_demissao: '', email_corporativo: '', situacao: 'ATIVO', gse: '',
-})
-  const [editando, setEditando] = useState<string | null>(null)
-  const [modalExcluirAberto, setModalExcluirAberto] = useState(false)
-  const [confirmacaoMatricula, setConfirmacaoMatricula] = useState('')
-  const [excluindo, setExcluindo] = useState(false)
-  const [erroExcluir, setErroExcluir] = useState<string | null>(null)
-
-// ─── BUSCA STATS ─────────────────────────────────────────────────────────
-
-async function buscarStats() {
-  setCarregandoStats(true)
-  let todos: any[] = []; let from = 0
-  while (true) {
-    const { data } = await supabase.from('colaboradores').select('situacao').range(from, from + 999)
-    if (!data || data.length === 0) break
-    todos = [...todos, ...data]
-    if (data.length < 1000) break
-    from += 1000
+  // ─── BUSCA STATS ────────────────────────────────────────────────────────────
+  async function buscarStats() {
+    setCarregandoStats(true)
+    let todos: any[] = []; let from = 0
+    while (true) {
+      const { data } = await supabase.from('colaboradores').select('situacao').range(from, from + 999)
+      if (!data || data.length === 0) break
+      todos = [...todos, ...data]; if (data.length < 1000) break; from += 1000
+    }
+    setStatsTotal(todos.length); setStatsAtivo(todos.filter(c => c.situacao === 'ATIVO').length)
+    setStatsAfastado(todos.filter(c => c.situacao === 'AF.PREVIDÊNCIA').length); setStatsFerias(todos.filter(c => c.situacao === 'FÉRIAS').length)
+    setStatsAviso(todos.filter(c => c.situacao === 'AVISO PRÉVIO').length); setStatsLicenca(todos.filter(c => c.situacao === 'LICENÇA MATERNIDADE').length)
+    setStatsDemitido(todos.filter(c => c.situacao === 'DEMITIDO').length); setCarregandoStats(false)
   }
-  setStatsTotal(todos.length)
-  setStatsAtivo(todos.filter(c => c.situacao === 'ATIVO').length)
-  setStatsAfastado(todos.filter(c => c.situacao === 'AF.PREVIDÊNCIA').length)
-  setStatsFerias(todos.filter(c => c.situacao === 'FÉRIAS').length)
-  setStatsAviso(todos.filter(c => c.situacao === 'AVISO PRÉVIO').length)
-  setStatsLicenca(todos.filter(c => c.situacao === 'LICENÇA MATERNIDADE').length)
-  setStatsDemitido(todos.filter(c => c.situacao === 'DEMITIDO').length)
-  setCarregandoStats(false)
-}
 
-  // ─── BUSCA GSE ─────────────────────────────────────────────────────────
-
-async function buscarGsesDaFuncao(funcaoId: string) {
-  if (!funcaoId) { setGsesDaFuncao([]); return }
-  const funcao = funcoes.find(f => f.id === parseInt(funcaoId))
-  if (!funcao) { setGsesDaFuncao([]); return }
-  const { data } = await supabase
-    .from('gse_funcoes')
-    .select('gse_id, gses(id, setor)')
-    .eq('funcao', funcao.nome)
-  const lista = (data || []).map((g: any) => ({ id: g.gse_id, setor: g.gses?.setor || '' }))
-  setGsesDaFuncao(lista)
-  if (lista.length === 1) setForm(f => ({ ...f, gse: String(lista[0].id) }))
-  else setForm(f => ({ ...f, gse: '' }))
-}
-
-  // ─── BUSCA TABELA ─────────────────────────────────────────────────────────
+  async function buscarGsesDaFuncao(funcaoId: string) {
+    if (!funcaoId) { setGsesDaFuncao([]); return }
+    const funcao = funcoes.find(f => f.id === parseInt(funcaoId))
+    if (!funcao) { setGsesDaFuncao([]); return }
+    const { data } = await supabase.from('gse_funcoes').select('gse_id, gses(id, setor)').eq('funcao', funcao.nome)
+    const lista = (data || []).map((g: any) => ({ id: g.gse_id, setor: g.gses?.setor || '' }))
+    setGsesDaFuncao(lista)
+    if (lista.length === 1) setForm(f => ({ ...f, gse: String(lista[0].id) }))
+    else setForm(f => ({ ...f, gse: '' }))
+  }
 
   async function buscar(base: string, funcao: string, situacao: string, pag: number = 1, busca: string = '') {
     setCarregando(true)
-    const from = (pag - 1) * POR_PAGINA
-    const to = from + POR_PAGINA - 1
-
-    let q = supabase
-      .from('colaboradores')
-      .select(
-       'matricula, nome, funcao_id, gse, base_id, gerencia_id, contato, processo, data_admissao, data_demissao, email_corporativo, situacao, gerencia, supervisor, bases(nome), funcoes(nome)',
-       { count: 'exact' }
-    )
-      .order('nome')
-      .range(from, to)
-
+    const from = (pag - 1) * POR_PAGINA; const to = from + POR_PAGINA - 1
+    let q = supabase.from('colaboradores').select('matricula, nome, funcao_id, gse, base_id, gerencia_id, contato, processo, data_admissao, data_demissao, email_corporativo, situacao, gerencia, supervisor, sexo, bases(nome), funcoes(nome)', { count: 'exact' }).order('nome').range(from, to)
     if (situacao) q = q.eq('situacao', situacao)
     if (base) q = q.eq('base_id', parseInt(base))
     if (funcao) q = q.eq('funcao_id', parseInt(funcao))
     if (busca) q = q.or(`nome.ilike.%${busca}%,matricula.ilike.%${busca}%`)
-
     const { data, count } = await q
-    setColaboradores((data as unknown as Colaborador[]) || [])
-    setTotal(count || 0)
-    setCarregando(false)
+    setColaboradores((data as unknown as Colaborador[]) || []); setTotal(count || 0); setCarregando(false)
   }
 
   useEffect(() => {
     async function init() {
-    const [{ data: b }, { data: f }, { data: g }, { data: s }] = await Promise.all([
-  supabase.from('bases').select('id, nome').order('nome'),
-  supabase.from('funcoes').select('id, nome').order('nome'),
-  supabase.from('gerencias').select('id, sigla, nome, gerente_matricula').order('sigla'),
-  supabase.from('supervisores').select('id, nome').order('nome'),
-])
-setBases(b || [])
-setFuncoes(f || [])
-setGerencias((g as unknown as Gerencia[]) || [])
-setSupervisores((s as unknown as Supervisor[]) || [])
+      const [{ data: b }, { data: f }, { data: g }, { data: s }] = await Promise.all([
+        supabase.from('bases').select('id, nome').order('nome'),
+        supabase.from('funcoes').select('id, nome').order('nome'),
+        supabase.from('gerencias').select('id, sigla, nome, gerente_matricula').order('sigla'),
+        supabase.from('supervisores').select('id, nome').order('nome'),
+      ])
+      setBases(b || []); setFuncoes(f || []); setGerencias((g as unknown as Gerencia[]) || []); setSupervisores((s as unknown as Supervisor[]) || [])
       await Promise.all([buscar('', '', 'ATIVO', 1, ''), buscarStats()])
     }
     init()
   }, [])
 
-  useEffect(() => {
-    setPagina(1)
-    buscar(filtroBase, filtroFuncao, filtroSituacao, 1, filtroBusca)
-  }, [filtroBase, filtroFuncao, filtroSituacao, filtroBusca])
+  useEffect(() => { setPagina(1); buscar(filtroBase, filtroFuncao, filtroSituacao, 1, filtroBusca) }, [filtroBase, filtroFuncao, filtroSituacao, filtroBusca])
 
   function handleCard(status: FiltroCard) {
     if (filtroCard === status) { setFiltroCard(null); setFiltroSituacao('') }
     else { setFiltroCard(status); setFiltroSituacao(status || '') }
     setPagina(1)
   }
-
   function toggleOrdem(coluna: OrdemColuna) {
     if (ordemColuna === coluna) setOrdemDirecao(d => d === 'asc' ? 'desc' : 'asc')
     else { setOrdemColuna(coluna); setOrdemDirecao('asc') }
   }
-
-  function limparFiltros() {
-    setFiltroBusca(''); setFiltroBase(''); setFiltroFuncao('')
-    setFiltroSituacao('ATIVO'); setFiltroCard(null); setPagina(1)
-  }
+  function limparFiltros() { setFiltroBusca(''); setFiltroBase(''); setFiltroFuncao(''); setFiltroSituacao('ATIVO'); setFiltroCard(null); setPagina(1) }
 
   const ordenados = [...colaboradores].sort((a, b) => {
     let vA = '', vB = ''
@@ -225,55 +210,20 @@ setSupervisores((s as unknown as Supervisor[]) || [])
     return ordemDirecao === 'asc' ? vA.localeCompare(vB) : vB.localeCompare(vA)
   })
 
-function abrirNovo() {
-  setEditando(null)
-  setForm({
-    matricula: '', nome: '', funcao_id: '', base_id: '',
-    gerencia: '', supervisor: '', contato: '', processo: '',
-    data_admissao: '', data_demissao: '', email_corporativo: '', situacao: 'ATIVO', gse: '',
-  })
-  setGsesDaFuncao([])
-  setErro(null)
-  setModalAberto(true)
-}
-
+  function abrirNovo() {
+    setEditando(null); setForm({ matricula: '', nome: '', funcao_id: '', base_id: '', gerencia: '', supervisor: '', contato: '', processo: '', data_admissao: '', data_demissao: '', email_corporativo: '', situacao: 'ATIVO', gse: '', sexo: '' })
+    setGsesDaFuncao([]); setErro(null); setModalAberto(true)
+  }
   function abrirEdicao(c: Colaborador) {
     setEditando(c.matricula)
-    setForm({
-      matricula: c.matricula, nome: c.nome,
-      funcao_id: c.funcao_id?.toString() || '',
-      base_id: c.base_id?.toString() || '',
-      gerencia: c.gerencia || '',
-      supervisor: c.supervisor || '',
-      contato: c.contato || '',
-      processo: c.processo || '',
-      data_admissao: c.data_admissao || '',
-      data_demissao: c.data_demissao || '',
-      email_corporativo: c.email_corporativo || '',
-      situacao: c.situacao,  gse: c.gse?.toString() || '',
-  })
-  if (c.funcao_id) buscarGsesDaFuncao(c.funcao_id.toString())
-    setErro(null)
-    setModalAberto(true)
+    setForm({ matricula: c.matricula, nome: c.nome, funcao_id: c.funcao_id?.toString() || '', base_id: c.base_id?.toString() || '', gerencia: c.gerencia || '', supervisor: c.supervisor || '', contato: c.contato || '', processo: c.processo || '', data_admissao: c.data_admissao || '', data_demissao: c.data_demissao || '', email_corporativo: c.email_corporativo || '', situacao: c.situacao, gse: c.gse?.toString() || '', sexo: c.sexo || '' })
+    if (c.funcao_id) buscarGsesDaFuncao(c.funcao_id.toString())
+    setErro(null); setModalAberto(true)
   }
-
   async function salvar() {
     if (!form.nome || !form.matricula) { setErro('Nome e matrícula são obrigatórios.'); return }
     setSalvando(true); setErro(null)
-    const payload = {
-      matricula: form.matricula, nome: form.nome.toUpperCase(),
-      funcao_id: form.funcao_id ? parseInt(form.funcao_id) : null,
-      base_id: form.base_id ? parseInt(form.base_id) : null,
-      gerencia: form.gerencia || null,
-      supervisor: form.supervisor || null,
-      contato: form.contato || null,
-      processo: form.processo || null,
-      data_admissao: form.data_admissao || null,
-      data_demissao: form.data_demissao || null,
-      email_corporativo: form.email_corporativo || null,
-      situacao: form.situacao,
-      gse: form.gse ? parseInt(form.gse) : null,
-    }
+    const payload = { matricula: form.matricula, nome: form.nome.toUpperCase(), funcao_id: form.funcao_id ? parseInt(form.funcao_id) : null, base_id: form.base_id ? parseInt(form.base_id) : null, gerencia: form.gerencia || null, supervisor: form.supervisor || null, contato: form.contato || null, processo: form.processo || null, data_admissao: form.data_admissao || null, data_demissao: form.data_demissao || null, email_corporativo: form.email_corporativo || null, situacao: form.situacao, gse: form.gse ? parseInt(form.gse) : null, sexo: form.sexo || null }
     if (editando) {
       const { error } = await supabase.from('colaboradores').update(payload).eq('matricula', editando)
       if (error) { setErro('Erro ao salvar: ' + error.message); setSalvando(false); return }
@@ -281,102 +231,228 @@ function abrirNovo() {
       const { error } = await supabase.from('colaboradores').insert(payload)
       if (error) { setErro('Erro ao cadastrar: ' + error.message); setSalvando(false); return }
     }
-    setSalvando(false)
-    setModalAberto(false)
+    setSalvando(false); setModalAberto(false)
     await Promise.all([buscar(filtroBase, filtroFuncao, filtroSituacao, pagina, filtroBusca), buscarStats()])
   }
-
   async function excluir() {
-    if (confirmacaoMatricula !== editando) { setErroExcluir('Matrícula incorreta. Digite exatamente como mostrado.'); return }
+    if (confirmacaoMatricula !== editando) { setErroExcluir('Matrícula incorreta.'); return }
     setExcluindo(true); setErroExcluir(null)
     const { error } = await supabase.from('colaboradores').delete().eq('matricula', editando!)
-    if (error) { setErroExcluir('Erro ao excluir: ' + error.message); setExcluindo(false); return }
-    setExcluindo(false)
-    setModalExcluirAberto(false)
-    setModalAberto(false)
+    if (error) { setErroExcluir('Erro: ' + error.message); setExcluindo(false); return }
+    setExcluindo(false); setModalExcluirAberto(false); setModalAberto(false)
     await Promise.all([buscar(filtroBase, filtroFuncao, filtroSituacao, pagina, filtroBusca), buscarStats()])
   }
 
+  // ─── EXPORTAR ───────────────────────────────────────────────────────────────
+  async function exportar(tipo: 'csv' | 'xlsx') {
+    let todos: any[] = []; let from = 0
+    while (true) {
+      let q = supabase.from('colaboradores').select('matricula, nome, funcao_id, gse, base_id, situacao, gerencia, supervisor, processo, data_admissao, data_demissao, sexo, bases(nome), funcoes(nome)').order('nome').range(from, from + 499)
+      if (filtroSituacao) q = q.eq('situacao', filtroSituacao)
+      if (filtroBase) q = q.eq('base_id', parseInt(filtroBase))
+      if (filtroFuncao) q = q.eq('funcao_id', parseInt(filtroFuncao))
+      if (filtroBusca) q = q.or(`nome.ilike.%${filtroBusca}%,matricula.ilike.%${filtroBusca}%`)
+      const { data } = await q
+      if (!data || data.length === 0) break
+      todos = [...todos, ...data]; if (data.length < 500) break; from += 500
+    }
+    const linhas = todos.map((c: any) => ({ 'Matrícula': c.matricula, 'Nome': c.nome, 'Função': c.funcoes?.nome || '', 'Base': c.bases?.nome || '', 'GSE': c.gse || '', 'Gerência': c.gerencia || '', 'Supervisor': c.supervisor || '', 'Processo': c.processo || '', 'Sexo': c.sexo || '', 'Admissão': fmtData(c.data_admissao), 'Demissão': fmtData(c.data_demissao), 'Situação': c.situacao }))
+    const nome = `colaboradores-${new Date().toLocaleDateString('pt-BR').replace(/\//g, '-')}`
+    if (tipo === 'csv') {
+      const cols = Object.keys(linhas[0]); const csv = [cols.map(h => `"${h}"`).join(';'), ...linhas.map(r => cols.map(h => `"${String((r as any)[h] ?? '').replace(/"/g, '""')}"`).join(';'))].join('\n')
+      const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8;' })); a.download = nome + '.csv'; a.click()
+    } else {
+      const X = await import('xlsx'); const ws = X.utils.json_to_sheet(linhas); const wb = X.utils.book_new(); X.utils.book_append_sheet(wb, ws, 'Colaboradores'); X.writeFile(wb, nome + '.xlsx')
+    }
+  }
+
+  // ─── IMPORTAR ───────────────────────────────────────────────────────────────
+  async function processarArquivo(file: File) {
+    setImportProcessando(true); setImportErro(null); setImportLog([])
+    try {
+      const X = await import('xlsx')
+      const buffer = await file.arrayBuffer()
+      const wb = X.read(buffer, { type: 'array' })
+      const ws = wb.Sheets[wb.SheetNames[0]]
+      const rows: any[] = X.utils.sheet_to_json(ws, { defval: '' })
+
+      const logs: string[] = []
+
+      // Buscar mapeamentos
+      const { data: mapaSecao } = await supabase.from('secao_base_map').select('secao_texto, base_nome')
+      const secaoMap: Record<string, string> = {}
+      ;(mapaSecao || []).forEach((m: any) => { secaoMap[m.secao_texto.trim().toUpperCase()] = m.base_nome })
+
+      // Deduplica por CHAPA e filtra demitidos
+      const visto = new Set<string>()
+      const linhasFiltradas = rows.filter((r: any) => {
+        const mat = String(r['CHAPA'] || '').trim()
+        if (!mat) return false
+        const sit = mapSituacao(String(r['SITUAÇÃO'] || r['SITUACAO'] || ''))
+        if (sit === 'DEMITIDO') return false
+        if (visto.has(mat)) return false
+        visto.add(mat); return true
+      })
+
+      logs.push(`${rows.length} linhas lidas → ${linhasFiltradas.length} após filtrar demitidos e duplicatas`)
+
+      // Buscar colaboradores existentes
+      const matriculas = linhasFiltradas.map((r: any) => String(r['CHAPA']).trim())
+      const existentesMap: Record<string, any> = {}
+      for (let i = 0; i < matriculas.length; i += 100) {
+        const { data: ed } = await supabase.from('colaboradores').select('matricula, nome, situacao, sexo, estado_civil, data_nascimento, cpf, rg, rg_uf, data_admissao, data_demissao, base_id, funcao_id, bases(nome), funcoes(nome)').in('matricula', matriculas.slice(i, i + 100))
+        ;(ed || []).forEach((c: any) => { existentesMap[c.matricula] = c })
+      }
+
+      // Processar diffs
+      const diffs: DiffImport[] = []
+      for (const r of linhasFiltradas) {
+        const mat = String(r['CHAPA']).trim()
+        const nomeNovo = String(r['NOME'] || '').trim().toUpperCase()
+        const situacaoNova = mapSituacao(String(r['SITUAÇÃO'] || r['SITUACAO'] || ''))
+        const sexoNovo = String(r['SEXO'] || '').trim().toUpperCase() || null
+        const estadoCivilNovo = String(r['ESTADO_CIVIL'] || '').trim().toUpperCase() || null
+        const dtNascNova = parseDateBR(r['DTNASC'])
+        const cpfNovo = String(r['CPF'] || '').trim().replace(/\D/g, '') || null
+        const rgNovo = String(r['CARTIDENTIDADE'] || '').trim() || null
+        const rgUfNovo = String(r['UFCARTIDENT'] || '').trim().toUpperCase() || null
+        const dtAdmNova = parseDateBR(r['ADMISSÃO'] || r['ADMISSAO'])
+        const dtDemNova = parseDateBR(r['DEMISSÃO'] || r['DEMISSAO'])
+        const funcaoNome = String(r['FUNÇÃO'] || r['FUNCAO'] || '').trim().toUpperCase()
+        const funcaoEnc = funcoes.find(f => f.nome.toUpperCase() === funcaoNome)
+        const secaoKey = String(r['SEÇÃO'] || r['SECAO'] || '').trim().toUpperCase()
+        const baseNome = secaoMap[secaoKey] || null
+        const baseEnc = baseNome ? bases.find(b => b.nome.toUpperCase() === baseNome.toUpperCase()) : null
+
+        // CNH
+        const numeroCNH = String(r['CARTMOTORISTA'] || '').trim() || null
+        const categoriaCNH = String(r['TIPOCARTHABILIT'] || '').trim().toUpperCase() || null
+        const vencimentoCNH = parseDateBR(r['DTVENCHABILIT'])
+
+        const existente = existentesMap[mat]
+        const tipo = existente ? 'atualizacao' : 'novo'
+        const campos: DiffCampo[] = []
+
+        const check = (campo: string, label: string, antigo: string | null | undefined, novo: string | null | undefined) => {
+          const a = antigo || null; const n = novo || null
+          if (a !== n) campos.push({ campo, label, antigo: a, novo: n })
+        }
+
+        if (tipo === 'novo') {
+          campos.push({ campo: 'nome', label: 'Nome', antigo: null, novo: nomeNovo })
+          if (funcaoEnc) campos.push({ campo: 'funcao', label: 'Função', antigo: null, novo: funcaoEnc.nome })
+          if (baseEnc) campos.push({ campo: 'base', label: 'Base', antigo: null, novo: baseEnc.nome })
+          if (situacaoNova) campos.push({ campo: 'situacao', label: 'Situação', antigo: null, novo: situacaoNova })
+          if (dtAdmNova) campos.push({ campo: 'data_admissao', label: 'Admissão', antigo: null, novo: fmtData(dtAdmNova) })
+          if (sexoNovo) campos.push({ campo: 'sexo', label: 'Sexo', antigo: null, novo: sexoNovo })
+          if (cpfNovo) campos.push({ campo: 'cpf', label: 'CPF', antigo: null, novo: cpfNovo })
+        } else {
+          check('nome', 'Nome', existente.nome, nomeNovo)
+          check('situacao', 'Situação', existente.situacao, situacaoNova)
+          check('sexo', 'Sexo', existente.sexo, sexoNovo)
+          check('estado_civil', 'Estado Civil', existente.estado_civil, estadoCivilNovo)
+          check('data_nascimento', 'Dt. Nascimento', fmtData(existente.data_nascimento), fmtData(dtNascNova))
+          check('cpf', 'CPF', existente.cpf, cpfNovo)
+          check('rg', 'RG', existente.rg, rgNovo)
+          check('rg_uf', 'UF RG', existente.rg_uf, rgUfNovo)
+          check('data_admissao', 'Admissão', fmtData(existente.data_admissao), fmtData(dtAdmNova))
+          check('data_demissao', 'Demissão', fmtData(existente.data_demissao), fmtData(dtDemNova))
+          check('funcao', 'Função', existente.funcoes?.nome, funcaoEnc?.nome)
+          check('base', 'Base', existente.bases?.nome, baseEnc?.nome)
+        }
+
+        if (campos.length === 0 && tipo === 'atualizacao') continue
+
+        diffs.push({
+          matricula: mat, nome: nomeNovo, tipo, campos, selecionado: true,
+          dados: { matricula: mat, nome: nomeNovo, situacao: situacaoNova, sexo: sexoNovo, estado_civil: estadoCivilNovo, data_nascimento: dtNascNova, cpf: cpfNovo, rg: rgNovo, rg_uf: rgUfNovo, data_admissao: dtAdmNova, data_demissao: dtDemNova, funcao_id: funcaoEnc?.id || existente?.funcao_id || null, base_id: baseEnc?.id || existente?.base_id || null },
+          cnh: (numeroCNH || categoriaCNH || vencimentoCNH) ? { numero: numeroCNH, categoria: categoriaCNH, vencimento: vencimentoCNH } : undefined,
+        })
+      }
+
+      logs.push(`${diffs.filter(d => d.tipo === 'novo').length} novos colaboradores`)
+      logs.push(`${diffs.filter(d => d.tipo === 'atualizacao').length} atualizações encontradas`)
+      logs.push(`⚠ Verifique se todas as seções foram mapeadas corretamente em Configurações`)
+
+      setImportDiffs(diffs); setImportLog(logs); setImportStep(2)
+    } catch (e: any) {
+      setImportErro('Erro ao processar arquivo: ' + e.message)
+    }
+    setImportProcessando(false)
+  }
+
+  async function confirmarImportacao() {
+    const selecionados = importDiffs.filter(d => d.selecionado)
+    if (!selecionados.length) return
+    setImportSalvando(true)
+    let ok = 0; let erros = 0
+    for (const d of selecionados) {
+      try {
+        const { error } = await supabase.from('colaboradores').upsert(d.dados, { onConflict: 'matricula' })
+        if (error) { erros++; continue }
+        if (d.cnh?.numero) {
+          await supabase.from('cnhs').update({ is_atual: false }).eq('matricula_colaborador', d.matricula).eq('is_atual', true)
+          await supabase.from('cnhs').insert({ matricula_colaborador: d.matricula, numero_cnh: d.cnh.numero, categoria: d.cnh.categoria, data_vencimento: d.cnh.vencimento, is_atual: true, exigencia: 'SIM' })
+        }
+        ok++
+      } catch { erros++ }
+    }
+    setImportSalvando(false); setImportModal(false); setImportStep(1); setImportDiffs([])
+    alert(`Importação concluída!\n✅ ${ok} registros salvos\n${erros > 0 ? `❌ ${erros} erros` : ''}`)
+    await Promise.all([buscar(filtroBase, filtroFuncao, filtroSituacao, pagina, filtroBusca), buscarStats()])
+  }
+
+  // ─── ESTILOS ─────────────────────────────────────────────────────────────────
   const totalPaginas = Math.ceil(total / POR_PAGINA)
   const temFiltroAtivo = !!(filtroBusca || filtroBase || filtroFuncao || filtroCard || filtroSituacao !== 'ATIVO')
-
   const corSituacao = (s: string) => {
     if (s === 'ATIVO') return { bg: '#f0fdf4', cor: '#16a34a' }
-    if (s === 'AF.PREVIDENCIA') return { bg: '#fffbeb', cor: '#b45309' }
-    if (s === 'APOS.INVALIDEZ') return { bg: '#eff6ff', cor: '#2563eb' }
+    if (s === 'AF.PREVIDÊNCIA') return { bg: '#fffbeb', cor: '#b45309' }
     return { bg: '#fef2f2', cor: '#dc2626' }
   }
-
-  const inputStyle: React.CSSProperties = {
-    width: '100%', height: 38, border: '1px solid #e0e0e0', borderRadius: 8,
-    padding: '0 12px', fontSize: 13, color: '#333', backgroundColor: '#fafafa',
-    outline: 'none', boxSizing: 'border-box',
-  }
+  const inputStyle: React.CSSProperties = { width: '100%', height: 38, border: '1px solid #e0e0e0', borderRadius: 8, padding: '0 12px', fontSize: 13, color: '#333', backgroundColor: '#fafafa', outline: 'none', boxSizing: 'border-box' }
   const labelStyle: React.CSSProperties = { display: 'block', fontSize: 12, color: '#666', marginBottom: 5 }
-  const selectStyle: React.CSSProperties = {
-    height: 38, border: '1px solid #e0e0e0', borderRadius: 8,
-    padding: '0 12px', fontSize: 13, backgroundColor: 'white', color: '#555',
-    outline: 'none', boxSizing: 'border-box',
-  }
+  const selectStyle: React.CSSProperties = { height: 38, border: '1px solid #e0e0e0', borderRadius: 8, padding: '0 12px', fontSize: 13, backgroundColor: 'white', color: '#555', outline: 'none', boxSizing: 'border-box' }
 
   return (
     <div style={{ fontFamily: 'Arial, sans-serif', display: 'flex', flexDirection: 'column', height: '100%' }}>
 
       {/* CABEÇALHO */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, gap: 8, flexWrap: 'wrap' }}>
         <h1 style={{ fontSize: 18, fontWeight: 600, color: '#1a1a1a', margin: 0 }}>Colaboradores</h1>
-        <button onClick={abrirNovo} style={{
-          height: 36, backgroundColor: COR, color: 'white',
-          border: 'none', borderRadius: 8, padding: '0 18px',
-          fontSize: 13, fontWeight: 500, cursor: 'pointer',
-        }}>
-          + Novo Colaborador
-        </button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <BotaoExportar onClick={exportar} />
+          <button onClick={() => { setImportModal(true); setImportStep(1); setImportDiffs([]); setImportErro(null); setImportLog([]) }}
+            style={{ height: 36, padding: '0 14px', fontSize: 13, border: '1px solid #e0e0e0', borderRadius: 8, backgroundColor: 'white', color: '#555', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}>
+            📤 Importar
+          </button>
+          <button onClick={abrirNovo} style={{ height: 36, backgroundColor: COR, color: 'white', border: 'none', borderRadius: 8, padding: '0 18px', fontSize: 13, fontWeight: 500, cursor: 'pointer' }}>
+            + Novo Colaborador
+          </button>
+        </div>
       </div>
 
       {/* CARDS */}
       {carregandoStats ? (
         <div style={{ display: 'flex', gap: 12, marginBottom: 12, overflowX: 'auto', paddingBottom: 4 }}>
-          {[...Array(5)].map((_, i) => (
-            <div key={i} style={{ backgroundColor: 'white', borderRadius: 10, padding: '10px 16px', border: '1px solid #f0f0f0', minWidth: 140, flex: '1 0 140px' }}>
-              <div style={{ height: 10, backgroundColor: '#f0f0f0', borderRadius: 4, marginBottom: 8, width: '60%' }} />
-              <div style={{ height: 24, backgroundColor: '#f0f0f0', borderRadius: 4, width: '40%' }} />
-            </div>
-          ))}
+          {[...Array(5)].map((_, i) => <div key={i} style={{ backgroundColor: 'white', borderRadius: 10, padding: '10px 16px', border: '1px solid #f0f0f0', minWidth: 140, flex: '1 0 140px' }}><div style={{ height: 10, backgroundColor: '#f0f0f0', borderRadius: 4, marginBottom: 8, width: '60%' }} /><div style={{ height: 24, backgroundColor: '#f0f0f0', borderRadius: 4, width: '40%' }} /></div>)}
         </div>
       ) : (
         <div style={{ display: 'flex', gap: 12, marginBottom: 12, overflowX: 'auto', paddingBottom: 4 }}>
           {[
-        { label: 'Total',              valor: statsTotal,    cor: '#4a4a49', status: null },
-        { label: 'Ativos',             valor: statsAtivo,    cor: '#16a34a', status: 'ATIVO' as FiltroCard },
-        { label: 'AF. Previdência',    valor: statsAfastado, cor: '#b45309', status: 'AF.PREVIDÊNCIA' as FiltroCard },
-        { label: 'Férias',             valor: statsFerias,   cor: '#0284c7', status: 'FÉRIAS' as FiltroCard },
-        { label: 'Aviso Prévio',       valor: statsAviso,    cor: '#7c3aed', status: 'AVISO PRÉVIO' as FiltroCard },
-        { label: 'Licença Maternidade',valor: statsLicenca,  cor: '#db2777', status: 'LICENÇA MATERNIDADE' as FiltroCard },
-        { label: 'Demitidos',          valor: statsDemitido, cor: '#dc2626', status: 'DEMITIDO' as FiltroCard },
+            { label: 'Total', valor: statsTotal, cor: '#4a4a49', status: null },
+            { label: 'Ativos', valor: statsAtivo, cor: '#16a34a', status: 'ATIVO' as FiltroCard },
+            { label: 'AF. Previdência', valor: statsAfastado, cor: '#b45309', status: 'AF.PREVIDÊNCIA' as FiltroCard },
+            { label: 'Férias', valor: statsFerias, cor: '#0284c7', status: 'FÉRIAS' as FiltroCard },
+            { label: 'Aviso Prévio', valor: statsAviso, cor: '#7c3aed', status: 'AVISO PRÉVIO' as FiltroCard },
+            { label: 'Licença Maternidade', valor: statsLicenca, cor: '#db2777', status: 'LICENÇA MATERNIDADE' as FiltroCard },
+            { label: 'Demitidos', valor: statsDemitido, cor: '#dc2626', status: 'DEMITIDO' as FiltroCard },
           ].map((card, i) => {
             const ativo = filtroCard === card.status && card.status !== null
             return (
-              <div
-                key={i}
-                onClick={() => card.status !== null && handleCard(card.status)}
-                style={{
-                  backgroundColor: ativo ? card.cor + '12' : 'white',
-                  borderRadius: 10, padding: '10px 16px',
-                  border: ativo ? `2px solid ${card.cor}` : '1px solid #f0f0f0',
-                  minWidth: 140, flex: '1 0 140px',
-                  cursor: card.status !== null ? 'pointer' : 'default',
-                  transition: 'all 0.15s ease',
-                  boxShadow: ativo ? `0 2px 8px ${card.cor}30` : 'none',
-                }}
-              >
-                <p style={{ fontSize: 11, color: '#888', margin: '0 0 4px' }}>
-                  {card.label}
-                  {ativo && <span style={{ marginLeft: 6, fontSize: 10, color: card.cor }}>● filtrado</span>}
-                </p>
-                <p style={{ fontSize: 24, fontWeight: 600, color: card.cor, margin: 0 }}>
-                  {card.valor.toLocaleString('pt-BR')}
-                </p>
+              <div key={i} onClick={() => card.status !== null && handleCard(card.status)} style={{ backgroundColor: ativo ? card.cor + '12' : 'white', borderRadius: 10, padding: '10px 16px', border: ativo ? `2px solid ${card.cor}` : '1px solid #f0f0f0', minWidth: 140, flex: '1 0 140px', cursor: card.status !== null ? 'pointer' : 'default', transition: 'all 0.15s ease', boxShadow: ativo ? `0 2px 8px ${card.cor}30` : 'none' }}>
+                <p style={{ fontSize: 11, color: '#888', margin: '0 0 4px' }}>{card.label}{ativo && <span style={{ marginLeft: 6, fontSize: 10, color: card.cor }}>● filtrado</span>}</p>
+                <p style={{ fontSize: 24, fontWeight: 600, color: card.cor, margin: 0 }}>{card.valor.toLocaleString('pt-BR')}</p>
               </div>
             )
           })}
@@ -385,35 +461,16 @@ function abrirNovo() {
 
       {/* FILTROS */}
       <div style={{ display: 'flex', gap: 10, marginBottom: 12, flexWrap: 'wrap', alignItems: 'center' }}>
-        <input type="text" placeholder="🔍BUSCAR NOME OU MATRICULA" value={filtroBusca}
-          onChange={e => setFiltroBusca(e.target.value)}
-          style={{ ...selectStyle, width: 260 }} />
-        <select value={filtroBase} onChange={e => setFiltroBase(e.target.value)} style={{ ...selectStyle, width: 180 }}>
-          <option value="">TODAS AS BASES</option>
-          {bases.map(b => <option key={b.id} value={b.id}>{b.nome}</option>)}
-        </select>
-        <select value={filtroFuncao} onChange={e => setFiltroFuncao(e.target.value)} style={{ ...selectStyle, width: 220 }}>
-          <option value="">TODAS AS FUNCÕES</option>
-          {funcoes.map(f => <option key={f.id} value={f.id}>{f.nome}</option>)}
-        </select>
-        <select value={filtroSituacao} onChange={e => { setFiltroSituacao(e.target.value); setFiltroCard(null) }} style={{ ...selectStyle, width: 160 }}>
-          <option value="">TODAS AS SITUAÇÕES</option>
-          {SITUACOES.map(s => <option key={s} value={s}>{s}</option>)}
-        </select>
+        <input type="text" placeholder="🔍 Buscar nome ou matrícula" value={filtroBusca} onChange={e => setFiltroBusca(e.target.value)} style={{ ...selectStyle, width: 260 }} />
+        <select value={filtroBase} onChange={e => setFiltroBase(e.target.value)} style={{ ...selectStyle, width: 180 }}><option value="">TODAS AS BASES</option>{bases.map(b => <option key={b.id} value={b.id}>{b.nome}</option>)}</select>
+        <select value={filtroFuncao} onChange={e => setFiltroFuncao(e.target.value)} style={{ ...selectStyle, width: 220 }}><option value="">TODAS AS FUNÇÕES</option>{funcoes.map(f => <option key={f.id} value={f.id}>{f.nome}</option>)}</select>
+        <select value={filtroSituacao} onChange={e => { setFiltroSituacao(e.target.value); setFiltroCard(null) }} style={{ ...selectStyle, width: 160 }}><option value="">TODAS AS SITUAÇÕES</option>{SITUACOES.map(s => <option key={s} value={s}>{s}</option>)}</select>
         <div style={{ flex: 1 }} />
-        {temFiltroAtivo && (
-          <button onClick={limparFiltros} style={{
-            height: 36, padding: '0 12px', fontSize: 12,
-            border: '1px solid #fca5a5', borderRadius: 8,
-            backgroundColor: '#fef2f2', color: '#dc2626', cursor: 'pointer',
-          }}>✕ Limpar</button>
-        )}
+        {temFiltroAtivo && <button onClick={limparFiltros} style={{ height: 36, padding: '0 12px', fontSize: 12, border: '1px solid #fca5a5', borderRadius: 8, backgroundColor: '#fef2f2', color: '#dc2626', cursor: 'pointer' }}>✕ Limpar</button>}
       </div>
 
       {/* TABELA */}
-      {carregando ? (
-        <p style={{ color: '#888', fontSize: 14 }}>Carregando...</p>
-      ) : (
+      {carregando ? <p style={{ color: '#888', fontSize: 14 }}>Carregando...</p> : (
         <>
           <div style={{ overflowX: 'auto', overflowY: 'auto', maxHeight: 'calc(100vh - 280px)', borderRadius: 12, border: '1px solid #f0f0f0', flex: 1 }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', backgroundColor: 'white', fontSize: 13 }}>
@@ -435,53 +492,27 @@ function abrirNovo() {
                 </tr>
               </thead>
               <tbody>
-                {ordenados.length === 0 ? (
-                  <tr>
-                    <td colSpan={9} style={{ padding: '48px 16px', textAlign: 'center', color: '#aaa', fontSize: 14 }}>
-                      <p style={{ fontSize: 28, margin: '0 0 8px' }}>👤</p>
-                      Nenhum colaborador encontrado.
-                    </td>
-                  </tr>
-                ) : ordenados.map((c, i) => {
-                  const cor = corSituacao(c.situacao)
-                  return (
-                    <tr key={c.matricula} style={{ borderBottom: '1px solid #f5f5f5', backgroundColor: i % 2 === 0 ? 'white' : '#fafafa' }}>
-                      <td style={{ padding: '10px 16px', fontWeight: 500, color: '#333', whiteSpace: 'nowrap' }}>{c.nome}</td>
-                      <td style={{ padding: '10px 16px', color: '#666' }}>{c.matricula}</td>
-                      <td style={{ padding: '10px 16px', color: '#666', whiteSpace: 'nowrap' }}>{c.funcoes?.nome || '—'}</td>
-                      <td style={{ padding: '10px 16px', color: '#666', whiteSpace: 'nowrap' }}>{c.processo || '—'}</td>
-                      <td style={{ padding: '10px 16px', color: '#666', textAlign: 'center' }}>{c.gse ?? '—'}</td>
-                      <td style={{ padding: '10px 16px', color: '#666', whiteSpace: 'nowrap' }}>{c.bases?.nome || '—'}</td>
-                      <td style={{ padding: '10px 16px', color: '#666', whiteSpace: 'nowrap' }}>
-                       {c.gerencia
-                   ? <span style={{ fontSize: 11, backgroundColor: '#fdf2f5', color: COR, padding: '2px 8px', borderRadius: 99, fontWeight: 600 }}>{c.gerencia}</span>
-                  : '—'}
-                     </td>
-                       <td style={{ padding: '10px 16px', color: '#666', whiteSpace: 'nowrap' }}>
-                      {c.supervisor ? c.supervisor.trim().split(' ')[0] : '—'}
-                     </td>
-                      <td style={{ padding: '10px 16px', color: '#666', whiteSpace: 'nowrap' }}>
-                      {c.data_admissao ? new Date(c.data_admissao + 'T12:00:00').toLocaleDateString('pt-BR') : '—'}
-                      </td>
-                      <td style={{ padding: '10px 16px', color: '#666', whiteSpace: 'nowrap' }}>
-                      {c.data_demissao ? new Date(c.data_demissao + 'T12:00:00').toLocaleDateString('pt-BR') : '—'}
-                      </td>
-                      <td style={{ padding: '10px 16px', color: '#666' }}>{c.email_corporativo || '—'}</td>
-                      <td style={{ padding: '10px 16px' }}>
-                        <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 99, backgroundColor: cor.bg, color: cor.cor }}>
-                          {c.situacao}
-                        </span>
-                      </td>
-                      <td style={{ padding: '10px 16px' }}>
-                        <button onClick={() => abrirEdicao(c)} style={{
-                          fontSize: 12, color: COR, background: 'none',
-                          border: `1px solid ${COR}`, borderRadius: 6,
-                          padding: '4px 12px', cursor: 'pointer',
-                        }}>Editar</button>
-                      </td>
-                    </tr>
-                  )
-                })}
+                {ordenados.length === 0 ? <tr><td colSpan={13} style={{ padding: '48px 16px', textAlign: 'center', color: '#aaa', fontSize: 14 }}><p style={{ fontSize: 28, margin: '0 0 8px' }}>👤</p>Nenhum colaborador encontrado.</td></tr>
+                  : ordenados.map((c, i) => {
+                    const cor = corSituacao(c.situacao)
+                    return (
+                      <tr key={c.matricula} style={{ borderBottom: '1px solid #f5f5f5', backgroundColor: i % 2 === 0 ? 'white' : '#fafafa' }}>
+                        <td style={{ padding: '10px 16px', fontWeight: 500, color: '#333', whiteSpace: 'nowrap' }}>{c.nome}</td>
+                        <td style={{ padding: '10px 16px', color: '#666' }}>{c.matricula}</td>
+                        <td style={{ padding: '10px 16px', color: '#666', whiteSpace: 'nowrap' }}>{c.funcoes?.nome || '—'}</td>
+                        <td style={{ padding: '10px 16px', color: '#666', whiteSpace: 'nowrap' }}>{c.processo || '—'}</td>
+                        <td style={{ padding: '10px 16px', color: '#666', textAlign: 'center' }}>{c.gse ?? '—'}</td>
+                        <td style={{ padding: '10px 16px', color: '#666', whiteSpace: 'nowrap' }}>{c.bases?.nome || '—'}</td>
+                        <td style={{ padding: '10px 16px', color: '#666', whiteSpace: 'nowrap' }}>{c.gerencia ? <span style={{ fontSize: 11, backgroundColor: '#fdf2f5', color: COR, padding: '2px 8px', borderRadius: 99, fontWeight: 600 }}>{c.gerencia}</span> : '—'}</td>
+                        <td style={{ padding: '10px 16px', color: '#666', whiteSpace: 'nowrap' }}>{c.supervisor ? c.supervisor.trim().split(' ')[0] : '—'}</td>
+                        <td style={{ padding: '10px 16px', color: '#666', whiteSpace: 'nowrap' }}>{fmtData(c.data_admissao)}</td>
+                        <td style={{ padding: '10px 16px', color: '#666', whiteSpace: 'nowrap' }}>{fmtData(c.data_demissao)}</td>
+                        <td style={{ padding: '10px 16px', color: '#666' }}>{c.email_corporativo || '—'}</td>
+                        <td style={{ padding: '10px 16px' }}><span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 99, backgroundColor: cor.bg, color: cor.cor }}>{c.situacao}</span></td>
+                        <td style={{ padding: '10px 16px' }}><button onClick={() => abrirEdicao(c)} style={{ fontSize: 12, color: COR, background: 'none', border: `1px solid ${COR}`, borderRadius: 6, padding: '4px 12px', cursor: 'pointer' }}>Editar</button></td>
+                      </tr>
+                    )
+                  })}
               </tbody>
             </table>
           </div>
@@ -489,43 +520,130 @@ function abrirNovo() {
           {/* PAGINAÇÃO */}
           {total > POR_PAGINA && (
             <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 8, paddingTop: 16 }}>
-              <button
-                onClick={() => { const p = pagina - 1; setPagina(p); buscar(filtroBase, filtroFuncao, filtroSituacao, p, filtroBusca) }}
-                disabled={pagina === 1}
-                style={{ height: 32, padding: '0 14px', borderRadius: 8, border: '1px solid #e0e0e0', backgroundColor: 'white', fontSize: 13, cursor: pagina === 1 ? 'not-allowed' : 'pointer', color: pagina === 1 ? '#ccc' : '#555' }}
-              >← Anterior</button>
-
-              {Array.from({ length: totalPaginas }, (_, i) => i + 1)
-                .filter(p => p === 1 || p === totalPaginas || Math.abs(p - pagina) <= 1)
-                .reduce<(number | '...')[]>((acc, p, idx, arr) => {
-                  if (idx > 0 && typeof arr[idx - 1] === 'number' && (p as number) - (arr[idx - 1] as number) > 1) acc.push('...')
-                  acc.push(p)
-                  return acc
-                }, [])
-                .map((p, idx) => p === '...'
-                  ? <span key={`ellipsis-${idx}`} style={{ fontSize: 13, color: '#aaa', padding: '0 4px' }}>…</span>
-                  : (
-                    <button key={p} onClick={() => { setPagina(p as number); buscar(filtroBase, filtroFuncao, filtroSituacao, p as number, filtroBusca) }} style={{
-                      height: 32, width: 32, borderRadius: 8, fontSize: 13, cursor: 'pointer',
-                      border: pagina === p ? `2px solid ${COR}` : '1px solid #e0e0e0',
-                      backgroundColor: pagina === p ? '#fdf2f5' : 'white',
-                      color: pagina === p ? COR : '#555', fontWeight: pagina === p ? 600 : 400,
-                    }}>{p}</button>
-                  )
-                )}
-
-              <button
-                onClick={() => { const p = pagina + 1; setPagina(p); buscar(filtroBase, filtroFuncao, filtroSituacao, p, filtroBusca) }}
-                disabled={pagina >= totalPaginas}
-                style={{ height: 32, padding: '0 14px', borderRadius: 8, border: '1px solid #e0e0e0', backgroundColor: 'white', fontSize: 13, cursor: pagina >= totalPaginas ? 'not-allowed' : 'pointer', color: pagina >= totalPaginas ? '#ccc' : '#555' }}
-              >Próxima →</button>
-
-              <span style={{ fontSize: 12, color: '#888', marginLeft: 8 }}>
-                Mostrando {((pagina - 1) * POR_PAGINA) + 1}–{Math.min(pagina * POR_PAGINA, total)} de {total}
-              </span>
+              <button onClick={() => { const p = pagina - 1; setPagina(p); buscar(filtroBase, filtroFuncao, filtroSituacao, p, filtroBusca) }} disabled={pagina === 1} style={{ height: 32, padding: '0 14px', borderRadius: 8, border: '1px solid #e0e0e0', backgroundColor: 'white', fontSize: 13, cursor: pagina === 1 ? 'not-allowed' : 'pointer', color: pagina === 1 ? '#ccc' : '#555' }}>← Anterior</button>
+              {Array.from({ length: totalPaginas }, (_, i) => i + 1).filter(p => p === 1 || p === totalPaginas || Math.abs(p - pagina) <= 1).reduce<(number | '...')[]>((acc, p, idx, arr) => { if (idx > 0 && typeof arr[idx - 1] === 'number' && (p as number) - (arr[idx - 1] as number) > 1) acc.push('...'); acc.push(p); return acc }, []).map((p, idx) => p === '...' ? <span key={`e-${idx}`} style={{ fontSize: 13, color: '#aaa', padding: '0 4px' }}>…</span> : <button key={p} onClick={() => { setPagina(p as number); buscar(filtroBase, filtroFuncao, filtroSituacao, p as number, filtroBusca) }} style={{ height: 32, width: 32, borderRadius: 8, fontSize: 13, cursor: 'pointer', border: pagina === p ? `2px solid ${COR}` : '1px solid #e0e0e0', backgroundColor: pagina === p ? '#fdf2f5' : 'white', color: pagina === p ? COR : '#555', fontWeight: pagina === p ? 600 : 400 }}>{p}</button>)}
+              <button onClick={() => { const p = pagina + 1; setPagina(p); buscar(filtroBase, filtroFuncao, filtroSituacao, p, filtroBusca) }} disabled={pagina >= totalPaginas} style={{ height: 32, padding: '0 14px', borderRadius: 8, border: '1px solid #e0e0e0', backgroundColor: 'white', fontSize: 13, cursor: pagina >= totalPaginas ? 'not-allowed' : 'pointer', color: pagina >= totalPaginas ? '#ccc' : '#555' }}>Próxima →</button>
+              <span style={{ fontSize: 12, color: '#888', marginLeft: 8 }}>Mostrando {((pagina - 1) * POR_PAGINA) + 1}–{Math.min(pagina * POR_PAGINA, total)} de {total}</span>
             </div>
           )}
         </>
+      )}
+
+      {/* ─── MODAL IMPORTAR ─── */}
+      {importModal && (
+        <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100 }}>
+          <div style={{ backgroundColor: 'white', borderRadius: 16, padding: 28, width: '100%', maxWidth: importStep === 2 ? 800 : 480, maxHeight: '90vh', overflowY: 'auto', boxShadow: '0 20px 60px rgba(0,0,0,0.2)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+              <div>
+                <h2 style={{ fontSize: 17, fontWeight: 600, margin: 0 }}>Importar Colaboradores</h2>
+                <p style={{ fontSize: 12, color: '#888', margin: '3px 0 0' }}>{importStep === 1 ? 'Selecione o arquivo do TOTVS' : `${importDiffs.length} alterações encontradas`}</p>
+              </div>
+              <button onClick={() => setImportModal(false)} style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: '#aaa' }}>✕</button>
+            </div>
+
+            {importStep === 1 && (
+              <div>
+                {/* Zona de upload */}
+                <div onClick={() => fileInputRef.current?.click()} style={{ border: '2px dashed #e0e0e0', borderRadius: 12, padding: '40px 20px', textAlign: 'center', cursor: 'pointer', backgroundColor: '#fafafa', transition: 'all 0.2s' }}
+                  onMouseEnter={e => e.currentTarget.style.borderColor = COR}
+                  onMouseLeave={e => e.currentTarget.style.borderColor = '#e0e0e0'}>
+                  <p style={{ fontSize: 32, margin: '0 0 8px' }}>📂</p>
+                  <p style={{ fontSize: 14, fontWeight: 500, color: '#333', margin: '0 0 4px' }}>Clique para selecionar o arquivo</p>
+                  <p style={{ fontSize: 12, color: '#888', margin: 0 }}>Suporta .xlsx, .xls e .csv do TOTVS</p>
+                </div>
+                <input ref={fileInputRef} type="file" accept=".xlsx,.xls,.csv" style={{ display: 'none' }} onChange={e => { const f = e.target.files?.[0]; if (f) processarArquivo(f) }} />
+
+                {importProcessando && (
+                  <div style={{ marginTop: 16, padding: 12, backgroundColor: '#f0f9ff', borderRadius: 8, border: '1px solid #bae6fd' }}>
+                    <p style={{ fontSize: 13, color: '#0369a1', margin: 0 }}>⏳ Processando arquivo...</p>
+                  </div>
+                )}
+                {importErro && (
+                  <div style={{ marginTop: 16, padding: 12, backgroundColor: '#fef2f2', borderRadius: 8, border: '1px solid #fca5a5' }}>
+                    <p style={{ fontSize: 13, color: '#dc2626', margin: 0 }}>❌ {importErro}</p>
+                  </div>
+                )}
+
+                {/* Instruções */}
+                <div style={{ marginTop: 16, padding: 12, backgroundColor: '#fffbeb', borderRadius: 8, border: '1px solid #fde68a', fontSize: 12, color: '#78350f' }}>
+                  <p style={{ fontWeight: 600, margin: '0 0 6px' }}>📋 Colunas reconhecidas do TOTVS:</p>
+                  <p style={{ margin: 0, lineHeight: 1.8 }}>CHAPA (matrícula) · NOME · FUNÇÃO · SEXO · ESTADO_CIVIL · SITUAÇÃO · SEÇÃO (base) · DTNASC · CPF · CARTIDENTIDADE (RG) · UFCARTIDENT · ADMISSÃO · DEMISSÃO · CARTMOTORISTA (CNH) · TIPOCARTHABILIT · DTVENCHABILIT</p>
+                </div>
+              </div>
+            )}
+
+            {importStep === 2 && (
+              <div>
+                {/* Log */}
+                {importLog.length > 0 && (
+                  <div style={{ marginBottom: 12, padding: '8px 12px', backgroundColor: '#f0fdf4', borderRadius: 8, border: '1px solid #bbf7d0', fontSize: 12, color: '#166534' }}>
+                    {importLog.map((l, i) => <p key={i} style={{ margin: '1px 0' }}>✓ {l}</p>)}
+                  </div>
+                )}
+
+                {/* Controles */}
+                <div style={{ display: 'flex', gap: 8, marginBottom: 12, alignItems: 'center' }}>
+                  <button onClick={() => setImportDiffs(d => d.map(x => ({ ...x, selecionado: true })))} style={{ fontSize: 12, padding: '5px 10px', border: '1px solid #e0e0e0', borderRadius: 6, background: 'white', cursor: 'pointer', color: '#555' }}>☑ Selecionar todos</button>
+                  <button onClick={() => setImportDiffs(d => d.map(x => ({ ...x, selecionado: false })))} style={{ fontSize: 12, padding: '5px 10px', border: '1px solid #e0e0e0', borderRadius: 6, background: 'white', cursor: 'pointer', color: '#555' }}>☐ Desmarcar todos</button>
+                  <span style={{ fontSize: 12, color: '#888', marginLeft: 'auto' }}>{importDiffs.filter(d => d.selecionado).length} de {importDiffs.length} selecionados</span>
+                </div>
+
+                {/* Tabela de diffs */}
+                <div style={{ border: '1px solid #f0f0f0', borderRadius: 10, overflow: 'hidden', maxHeight: 460, overflowY: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                    <thead>
+                      <tr style={{ backgroundColor: '#fafafa', position: 'sticky', top: 0 }}>
+                        <th style={{ padding: '8px 10px', textAlign: 'center', width: 36, borderBottom: '1px solid #f0f0f0' }}></th>
+                        <th style={{ padding: '8px 10px', textAlign: 'left', fontWeight: 600, color: '#555', borderBottom: '1px solid #f0f0f0', width: 70 }}>Status</th>
+                        <th style={{ padding: '8px 10px', textAlign: 'left', fontWeight: 600, color: '#555', borderBottom: '1px solid #f0f0f0', width: 80 }}>Matrícula</th>
+                        <th style={{ padding: '8px 10px', textAlign: 'left', fontWeight: 600, color: '#555', borderBottom: '1px solid #f0f0f0' }}>Nome</th>
+                        <th style={{ padding: '8px 10px', textAlign: 'left', fontWeight: 600, color: '#555', borderBottom: '1px solid #f0f0f0' }}>Alterações</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {importDiffs.length === 0 ? (
+                        <tr><td colSpan={5} style={{ padding: '32px', textAlign: 'center', color: '#aaa' }}>Nenhuma alteração detectada — dados já estão atualizados!</td></tr>
+                      ) : importDiffs.map((d, i) => (
+                        <tr key={d.matricula} style={{ borderBottom: '1px solid #f5f5f5', backgroundColor: d.selecionado ? (d.tipo === 'novo' ? '#f0fdf4' : '#fffbeb') : '#fafafa', opacity: d.selecionado ? 1 : 0.5 }}>
+                          <td style={{ padding: '8px 10px', textAlign: 'center' }}>
+                            <input type="checkbox" checked={d.selecionado} onChange={v => setImportDiffs(prev => prev.map((x, j) => j === i ? { ...x, selecionado: v.target.checked } : x))} style={{ width: 14, height: 14, cursor: 'pointer', accentColor: COR }} />
+                          </td>
+                          <td style={{ padding: '8px 10px' }}>
+                            <span style={{ fontSize: 10, fontWeight: 600, padding: '2px 6px', borderRadius: 99, backgroundColor: d.tipo === 'novo' ? '#dcfce7' : '#fef9c3', color: d.tipo === 'novo' ? '#15803d' : '#854d0e' }}>
+                              {d.tipo === 'novo' ? 'NOVO' : 'UPDATE'}
+                            </span>
+                          </td>
+                          <td style={{ padding: '8px 10px', color: '#666', fontFamily: 'monospace' }}>{d.matricula}</td>
+                          <td style={{ padding: '8px 10px', fontWeight: 500, color: '#333' }}>{d.nome}</td>
+                          <td style={{ padding: '8px 10px' }}>
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                              {d.campos.slice(0, 4).map(c => (
+                                <span key={c.campo} title={`${c.antigo || '(vazio)'} → ${c.novo || '(vazio)'}`} style={{ fontSize: 10, padding: '1px 6px', borderRadius: 4, backgroundColor: '#f1f5f9', color: '#475569', cursor: 'help' }}>
+                                  {c.label}
+                                </span>
+                              ))}
+                              {d.campos.length > 4 && <span style={{ fontSize: 10, color: '#94a3b8' }}>+{d.campos.length - 4}</span>}
+                              {d.cnh?.numero && <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 4, backgroundColor: '#ede9fe', color: '#6d28d9' }}>CNH</span>}
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Botões */}
+                <div style={{ display: 'flex', gap: 10, marginTop: 16, justifyContent: 'flex-end' }}>
+                  <button onClick={() => { setImportStep(1); setImportDiffs([]) }} style={{ height: 38, padding: '0 16px', border: '1px solid #e0e0e0', borderRadius: 8, fontSize: 13, cursor: 'pointer', background: 'white', color: '#555' }}>← Voltar</button>
+                  <button onClick={confirmarImportacao} disabled={importSalvando || importDiffs.filter(d => d.selecionado).length === 0}
+                    style={{ height: 38, padding: '0 24px', backgroundColor: importDiffs.filter(d => d.selecionado).length > 0 ? COR : '#e0e0e0', color: importDiffs.filter(d => d.selecionado).length > 0 ? 'white' : '#aaa', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: importDiffs.filter(d => d.selecionado).length > 0 ? 'pointer' : 'not-allowed', opacity: importSalvando ? 0.7 : 1 }}>
+                    {importSalvando ? '⏳ Salvando...' : `✅ Confirmar ${importDiffs.filter(d => d.selecionado).length} importações`}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
       )}
 
       {/* MODAL EDITAR/NOVO */}
@@ -539,176 +657,60 @@ function abrirNovo() {
               </div>
               <button onClick={() => setModalAberto(false)} style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: '#aaa' }}>✕</button>
             </div>
-
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+              <div style={{ gridColumn: '1 / -1' }}><label style={labelStyle}>Nome completo *</label><input value={form.nome} onChange={e => setForm({ ...form, nome: e.target.value })} style={inputStyle} placeholder="Nome do colaborador" /></div>
+              <div><label style={labelStyle}>Matrícula *</label><input value={form.matricula} onChange={e => setForm({ ...form, matricula: e.target.value })} style={{ ...inputStyle, backgroundColor: editando ? '#f5f5f5' : '#fafafa', color: editando ? '#aaa' : '#333' }} placeholder="Ex: 12345" disabled={!!editando} /></div>
+              <div><label style={labelStyle}>Situação</label><select value={form.situacao} onChange={e => setForm({ ...form, situacao: e.target.value })} style={inputStyle}>{SITUACOES.map(s => <option key={s} value={s}>{s}</option>)}</select></div>
+              <div><label style={labelStyle}>Função</label><select value={form.funcao_id} onChange={e => { setForm({ ...form, funcao_id: e.target.value }); buscarGsesDaFuncao(e.target.value) }} style={inputStyle}><option value="">Selecione...</option>{funcoes.map(f => <option key={f.id} value={f.id}>{f.nome}</option>)}</select></div>
+              <div><label style={labelStyle}>Base</label><select value={form.base_id} onChange={e => setForm({ ...form, base_id: e.target.value })} style={inputStyle}><option value="">Selecione...</option>{bases.map(b => <option key={b.id} value={b.id}>{b.nome}</option>)}</select></div>
+              <div><label style={labelStyle}>Sexo</label><select value={form.sexo} onChange={e => setForm({ ...form, sexo: e.target.value })} style={inputStyle}><option value="">Selecione...</option><option value="M">Masculino</option><option value="F">Feminino</option></select></div>
+              <div><label style={labelStyle}>Processo</label><select value={form.processo} onChange={e => setForm({ ...form, processo: e.target.value })} style={inputStyle}><option value="">Selecione...</option>{PROCESSOS.map(p => <option key={p} value={p}>{p}</option>)}</select></div>
+              <div style={{ gridColumn: '1 / -1' }}><label style={labelStyle}>Gerência</label><select value={form.gerencia} onChange={e => setForm({ ...form, gerencia: e.target.value })} style={inputStyle}><option value="">Selecione...</option>{gerencias.map(g => <option key={g.sigla} value={g.sigla}>{g.sigla} — {g.nome}</option>)}</select></div>
+              <div style={{ gridColumn: '1 / -1' }}><label style={labelStyle}>Supervisor</label><select value={form.supervisor} onChange={e => setForm({ ...form, supervisor: e.target.value })} style={inputStyle}><option value="">Selecione...</option>{supervisores.map(s => <option key={s.id} value={s.nome}>{s.nome}</option>)}</select></div>
+              <div><label style={labelStyle}>Contato</label><input value={form.contato} onChange={e => setForm({ ...form, contato: e.target.value })} style={inputStyle} placeholder="(69) 99999-9999" /></div>
               <div style={{ gridColumn: '1 / -1' }}>
-                <label style={labelStyle}>Nome completo *</label>
-                <input value={form.nome} onChange={e => setForm({ ...form, nome: e.target.value })} style={inputStyle} placeholder="Nome do colaborador" />
+                <label style={labelStyle}>GSE</label>
+                {gsesDaFuncao.length === 0 && <input value={form.gse} onChange={e => setForm({ ...form, gse: e.target.value })} style={inputStyle} placeholder="Selecione uma função primeiro" disabled />}
+                {gsesDaFuncao.length === 1 && <input value={`${gsesDaFuncao[0].id} — ${gsesDaFuncao[0].setor}`} style={{ ...inputStyle, backgroundColor: '#f0fdf4', color: '#16a34a' }} disabled />}
+                {gsesDaFuncao.length > 1 && <select value={form.gse} onChange={e => setForm({ ...form, gse: e.target.value })} style={inputStyle}><option value="">Selecione o GSE...</option>{gsesDaFuncao.map(g => <option key={g.id} value={g.id}>{g.id} — {g.setor}</option>)}</select>}
               </div>
-              <div>
-                <label style={labelStyle}>Matrícula *</label>
-                <input value={form.matricula} onChange={e => setForm({ ...form, matricula: e.target.value })} style={{ ...inputStyle, backgroundColor: editando ? '#f5f5f5' : '#fafafa', color: editando ? '#aaa' : '#333' }} placeholder="Ex: 12345" disabled={!!editando} />
-              </div>
-              <div>
-                <label style={labelStyle}>Situação</label>
-                <select value={form.situacao} onChange={e => setForm({ ...form, situacao: e.target.value })} style={inputStyle}>
-                  {SITUACOES.map(s => <option key={s} value={s}>{s}</option>)}
-                </select>
-              </div>
-              <div>
-                <label style={labelStyle}>Função</label>
-                <select value={form.funcao_id} onChange={e => { setForm({ ...form, funcao_id: e.target.value }); buscarGsesDaFuncao(e.target.value) }} style={inputStyle}>
-                  <option value="">Selecione...</option>
-                  {funcoes.map(f => <option key={f.id} value={f.id}>{f.nome}</option>)}
-                </select>
-              </div>
-              <div>
-                <label style={labelStyle}>Base</label>
-                <select value={form.base_id} onChange={e => setForm({ ...form, base_id: e.target.value })} style={inputStyle}>
-                  <option value="">Selecione...</option>
-                  {bases.map(b => <option key={b.id} value={b.id}>{b.nome}</option>)}
-                </select>
-              </div>
-              <div style={{ gridColumn: '1 / -1' }}>
-                <label style={labelStyle}>Gerência</label>
-            <select value={form.gerencia} onChange={e => setForm({ ...form, gerencia: e.target.value })} style={inputStyle}>
-  <option value="">Selecione...</option>
-  {gerencias.map(g => <option key={g.sigla} value={g.sigla}>{g.sigla} — {g.nome}</option>)}
-</select>
-              </div>
-            <div style={{ gridColumn: '1 / -1' }}>
-             <label style={labelStyle}>Supervisor</label>
-            <select value={form.supervisor} onChange={e => setForm({ ...form, supervisor: e.target.value })} style={inputStyle}>
-            <option value="">Selecione...</option>
-    {supervisores.map(s => <option key={s.id} value={s.nome}>{s.nome}</option>)}
-  </select>
-                </div>
-              <div>
-  <label style={labelStyle}>Contato (telefone)</label>
-  <input value={form.contato} onChange={e => setForm({ ...form, contato: e.target.value })} style={inputStyle} placeholder="(69) 99999-9999" />
-</div>
-<div>
-  <label style={labelStyle}>Processo</label>
-  <select value={form.processo} onChange={e => setForm({ ...form, processo: e.target.value })} style={inputStyle}>
-    <option value="">Selecione...</option>
-    {['Administrativo','Almoxarifado','Construção','Corte e Religação','Frota','Inspeção','Ligação Nova','Linha Viva','Manutenção','Plantão','Poda','Qualidade e Equipamentos','Seed Money','Segurança','Tat','Transporte'].map(p => <option key={p} value={p}>{p}</option>)}
-  </select>
-</div>
-
-{/* GSE */}
-<div style={{ gridColumn: '1 / -1' }}>
-  <label style={labelStyle}>GSE</label>
-  {gsesDaFuncao.length === 0 && (
-    <input value={form.gse} onChange={e => setForm({ ...form, gse: e.target.value })} style={inputStyle} placeholder="Selecione uma função primeiro" disabled />
-  )}
-  {gsesDaFuncao.length === 1 && (
-    <input value={`${gsesDaFuncao[0].id} — ${gsesDaFuncao[0].setor}`} style={{ ...inputStyle, backgroundColor: '#f0fdf4', color: '#16a34a' }} disabled />
-  )}
-  {gsesDaFuncao.length > 1 && (
-    <select value={form.gse} onChange={e => setForm({ ...form, gse: e.target.value })} style={inputStyle}>
-      <option value="">Selecione o GSE...</option>
-      {gsesDaFuncao.map(g => <option key={g.id} value={g.id}>{g.id} — {g.setor}</option>)}
-    </select>
-  )}
-</div>
-
-{/* Datas na mesma linha */}
-<div>
-  <label style={labelStyle}>Data de Admissão</label>
-  <input type="date" value={form.data_admissao} onChange={e => setForm({ ...form, data_admissao: e.target.value })} style={inputStyle} />
-</div>
-<div>
-  <label style={labelStyle}>Data de Demissão</label>
-  <input type="date" value={form.data_demissao} onChange={e => setForm({ ...form, data_demissao: e.target.value })} style={inputStyle} />
-</div>
-
-<div style={{ gridColumn: '1 / -1' }}>
-  <label style={labelStyle}>E-mail corporativo</label>
-  <input type="email" value={form.email_corporativo} onChange={e => setForm({ ...form, email_corporativo: e.target.value })} style={inputStyle} placeholder="email@cgbengenharia.com.br" />
-</div>
-              <div style={{ gridColumn: '1 / -1' }}>
-                <label style={labelStyle}>E-mail corporativo</label>
-                <input type="email" value={form.email_corporativo} onChange={e => setForm({ ...form, email_corporativo: e.target.value })} style={inputStyle} placeholder="email@cgbengenharia.com.br" />
-              </div>
+              <div><label style={labelStyle}>Data de Admissão</label><input type="date" value={form.data_admissao} onChange={e => setForm({ ...form, data_admissao: e.target.value })} style={inputStyle} /></div>
+              <div><label style={labelStyle}>Data de Demissão</label><input type="date" value={form.data_demissao} onChange={e => setForm({ ...form, data_demissao: e.target.value })} style={inputStyle} /></div>
+              <div style={{ gridColumn: '1 / -1' }}><label style={labelStyle}>E-mail corporativo</label><input type="email" value={form.email_corporativo} onChange={e => setForm({ ...form, email_corporativo: e.target.value })} style={inputStyle} placeholder="email@cgbengenharia.com.br" /></div>
             </div>
-
-            {erro && (
-              <div style={{ marginTop: 16, fontSize: 13, color: '#b91c1c', backgroundColor: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, padding: '8px 12px' }}>
-                {erro}
-              </div>
-            )}
-
+            {erro && <div style={{ marginTop: 16, fontSize: 13, color: '#b91c1c', backgroundColor: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, padding: '8px 12px' }}>{erro}</div>}
             <div style={{ display: 'flex', gap: 12, marginTop: 24, justifyContent: 'space-between', alignItems: 'center' }}>
-              {editando && usuario?.nivel === 'admin' && (
-                <button
-                  onClick={() => { setConfirmacaoMatricula(''); setErroExcluir(null); setModalExcluirAberto(true) }}
-                  style={{ height: 38, padding: '0 16px', border: '1px solid #fca5a5', borderRadius: 8, fontSize: 13, cursor: 'pointer', backgroundColor: '#fef2f2', color: '#dc2626' }}
-                >
-                  🗑 Excluir
-                </button>
-              )}
+              {editando && usuario?.nivel === 'admin' && <button onClick={() => { setConfirmacaoMatricula(''); setErroExcluir(null); setModalExcluirAberto(true) }} style={{ height: 38, padding: '0 16px', border: '1px solid #fca5a5', borderRadius: 8, fontSize: 13, cursor: 'pointer', backgroundColor: '#fef2f2', color: '#dc2626' }}>🗑 Excluir</button>}
               <div style={{ display: 'flex', gap: 12, marginLeft: 'auto' }}>
-                <button onClick={() => setModalAberto(false)} style={{ height: 38, padding: '0 20px', border: '1px solid #e0e0e0', borderRadius: 8, fontSize: 13, cursor: 'pointer', background: 'white', color: '#555' }}>
-                  Cancelar
-                </button>
-                <button onClick={salvar} disabled={salvando} style={{ height: 38, padding: '0 24px', backgroundColor: COR, color: 'white', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 500, cursor: salvando ? 'not-allowed' : 'pointer', opacity: salvando ? 0.7 : 1 }}>
-                  {salvando ? 'Salvando...' : 'Salvar'}
-                </button>
+                <button onClick={() => setModalAberto(false)} style={{ height: 38, padding: '0 20px', border: '1px solid #e0e0e0', borderRadius: 8, fontSize: 13, cursor: 'pointer', background: 'white', color: '#555' }}>Cancelar</button>
+                <button onClick={salvar} disabled={salvando} style={{ height: 38, padding: '0 24px', backgroundColor: COR, color: 'white', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 500, cursor: salvando ? 'not-allowed' : 'pointer', opacity: salvando ? 0.7 : 1 }}>{salvando ? 'Salvando...' : 'Salvar'}</button>
               </div>
             </div>
           </div>
         </div>
       )}
 
-      {/* MODAL CONFIRMAR EXCLUSÃO */}
+      {/* MODAL EXCLUIR */}
       {modalExcluirAberto && editando && (
         <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 200 }}>
           <div style={{ backgroundColor: 'white', borderRadius: 16, padding: 32, width: '100%', maxWidth: 440, boxShadow: '0 20px 60px rgba(0,0,0,0.25)' }}>
             <div style={{ textAlign: 'center', marginBottom: 24 }}>
               <p style={{ fontSize: 36, margin: '0 0 12px' }}>⚠️</p>
               <h2 style={{ fontSize: 17, fontWeight: 600, color: '#1a1a1a', margin: '0 0 8px' }}>Excluir Colaborador</h2>
-              <p style={{ fontSize: 13, color: '#666', margin: 0 }}>
-                Esta ação é <strong>irreversível</strong> e irá excluir todos os exames, auditorias e programações vinculadas.
-              </p>
+              <p style={{ fontSize: 13, color: '#666', margin: 0 }}>Esta ação é <strong>irreversível</strong> e irá excluir todos os dados vinculados.</p>
             </div>
-
             <div style={{ backgroundColor: '#fef2f2', border: '1px solid #fecaca', borderRadius: 10, padding: '12px 16px', marginBottom: 20 }}>
-              <p style={{ fontSize: 13, color: '#b91c1c', margin: 0, fontWeight: 500 }}>
-                Para confirmar, digite a matrícula: <strong>{editando}</strong>
-              </p>
+              <p style={{ fontSize: 13, color: '#b91c1c', margin: 0, fontWeight: 500 }}>Para confirmar, digite a matrícula: <strong>{editando}</strong></p>
             </div>
-
-            <input
-              autoFocus
-              value={confirmacaoMatricula}
-              onChange={e => setConfirmacaoMatricula(e.target.value)}
-              placeholder={`Digite ${editando} para confirmar`}
-              style={{ width: '100%', height: 40, border: '2px solid #fca5a5', borderRadius: 8, padding: '0 12px', fontSize: 14, outline: 'none', boxSizing: 'border-box', marginBottom: 12, textAlign: 'center', letterSpacing: 2 }}
-            />
-
-            {erroExcluir && (
-              <p style={{ fontSize: 12, color: '#dc2626', marginBottom: 12, textAlign: 'center' }}>{erroExcluir}</p>
-            )}
-
+            <input autoFocus value={confirmacaoMatricula} onChange={e => setConfirmacaoMatricula(e.target.value)} placeholder={`Digite ${editando} para confirmar`} style={{ width: '100%', height: 40, border: '2px solid #fca5a5', borderRadius: 8, padding: '0 12px', fontSize: 14, outline: 'none', boxSizing: 'border-box', marginBottom: 12, textAlign: 'center', letterSpacing: 2 }} />
+            {erroExcluir && <p style={{ fontSize: 12, color: '#dc2626', marginBottom: 12, textAlign: 'center' }}>{erroExcluir}</p>}
             <div style={{ display: 'flex', gap: 10 }}>
-              <button
-                onClick={() => setModalExcluirAberto(false)}
-                style={{ flex: 1, height: 40, border: '1px solid #e0e0e0', borderRadius: 8, fontSize: 13, cursor: 'pointer', background: 'white', color: '#555' }}
-              >
-                Cancelar
-              </button>
-              <button
-                onClick={excluir}
-                disabled={excluindo || confirmacaoMatricula !== editando}
-                style={{ flex: 1, height: 40, backgroundColor: confirmacaoMatricula === editando ? '#dc2626' : '#f5f5f5', color: confirmacaoMatricula === editando ? 'white' : '#aaa', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 500, cursor: confirmacaoMatricula === editando ? 'pointer' : 'not-allowed', transition: 'all 0.15s' }}
-              >
-                {excluindo ? 'Excluindo...' : 'Confirmar exclusão'}
-              </button>
+              <button onClick={() => setModalExcluirAberto(false)} style={{ flex: 1, height: 40, border: '1px solid #e0e0e0', borderRadius: 8, fontSize: 13, cursor: 'pointer', background: 'white', color: '#555' }}>Cancelar</button>
+              <button onClick={excluir} disabled={excluindo || confirmacaoMatricula !== editando} style={{ flex: 1, height: 40, backgroundColor: confirmacaoMatricula === editando ? '#dc2626' : '#f5f5f5', color: confirmacaoMatricula === editando ? 'white' : '#aaa', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 500, cursor: confirmacaoMatricula === editando ? 'pointer' : 'not-allowed', transition: 'all 0.15s' }}>{excluindo ? 'Excluindo...' : 'Confirmar exclusão'}</button>
             </div>
           </div>
         </div>
       )}
-
     </div>
   )
 }
