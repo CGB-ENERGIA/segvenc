@@ -456,7 +456,7 @@ function ModalExame({ dados, abaInicial, onClose, onUpdate, email, podeAuditar, 
   async function salvarAud() { if (!reg) return; if (!formAud.validado && !formAud.observacao) { setErrAud('Informe o motivo.'); return } setSalvAud(true); setErrAud(''); const { error } = await supabase.from('logs_auditoria').insert({ registro_id: reg.id, auditor_email: email, validado: formAud.validado, observacao: formAud.observacao || null, data_auditoria: new Date().toISOString() }); if (error) { setErrAud(error.message); setSalvAud(false); return } setSalvAud(false); onUpdate(); onClose() }
   async function excluir() { if (!reg) return; if (confNome !== treinamento.nome) { setErrExc('Nome não confere.'); return } setExcluindo(true); const { error } = await supabase.from('registros_exames').delete().eq('id', reg.id); if (error) { setErrExc(error.message); setExcluindo(false); return } onUpdate(); onClose() }
   const auds = [...(reg?.logs_auditoria || [])].sort((a, b) => new Date(b.data_auditoria).getTime() - new Date(a.data_auditoria).getTime())
-  const abas: { key: AbaModal; label: string }[] = [{ key: 'info', label: 'Informações' }, { key: 'documento', label: 'Documento' }, { key: 'programacao', label: 'Programação' }, ...(podeAuditar ? [{ key: 'auditoria' as AbaModal, label: 'Auditoria' }] : [])]
+  const abas: { key: AbaModal; label: string }[] = [{ key: 'info', label: 'Informações' },...(nivel !== 'visualizador' ? [{ key: 'documento' as AbaModal, label: 'Documento' },{ key: 'programacao' as AbaModal, label: 'Programação' },] : []),...(podeAuditar ? [{ key: 'auditoria' as AbaModal, label: 'Auditoria' }] : [])]
   const inp: React.CSSProperties = { width: '100%', height: 38, border: '1px solid #e0e0e0', borderRadius: 8, padding: '0 12px', fontSize: 13, boxSizing: 'border-box', outline: 'none' }
   return (
     <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 300 }}>
@@ -661,6 +661,7 @@ function ModalGerenciarColabPO({ onClose, onUpdate }: {
 // ─── PÁGINA PRINCIPAL ─────────────────────────────────────────────────────────
 export default function BasePOPage() {
   const router = useRouter(); const { usuario } = useAuth()
+  const podeEditar = usuario?.nivel !== 'visualizador'  // ← adicionar
   const [colabs, setColabs] = useState<Colaborador[]>([])
   const [treinamentos, setTreinamentos] = useState<Treinamento[]>([])
   const [bases, setBases] = useState<Base[]>([])
@@ -909,9 +910,11 @@ export default function BasePOPage() {
       <select value={filtroSup} onChange={e => setFiltroSup(e.target.value)} style={{ ...sel, width: 160 }}>
         <option value="">Todos os supervisores</option>{supervisoresDisp.map(s => <option key={s} value={s}>{primeiroNome(s)}</option>)}
       </select>
-      <button onClick={() => setModalGerenciar(true)} style={{ height: 36, padding: '0 12px', fontSize: 12, border: '1px solid #e0e0e0', borderRadius: 8, backgroundColor: 'white', color: '#555', cursor: 'pointer' }}>
-  👥 Gerenciar
-</button>
+      {podeEditar && (
+  <button onClick={() => setModalGerenciar(true)} style={{ height: 36, padding: '0 12px', fontSize: 12, border: '1px solid #e0e0e0', borderRadius: 8, backgroundColor: 'white', color: '#555', cursor: 'pointer' }}>
+    👥 Gerenciar
+  </button>
+)}
       {/* Toggle filtro N/A */}
       <button
         onClick={() => setOcultarNACompleto(v => !v)}
@@ -953,10 +956,12 @@ export default function BasePOPage() {
                   {vis('nome') && <td style={{ ...tdBase(), ...stickyTd(bg, leftNome), width: COL_NOME, minWidth: COL_NOME }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                       <span style={{ fontWeight: 500, color: '#333', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: COL_NOME - 40 }}>{c.nome}</span>
+                      {podeEditar && (
                       <button title="Novo registro" onClick={e => { e.stopPropagation(); setModalNovo({ colab: c }) }}
-                        style={{ width: 20, height: 20, borderRadius: '50%', backgroundColor: '#f0f0f0', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, color: '#888', flexShrink: 0, lineHeight: 1 }}
+                       style={{ width: 20, height: 20, borderRadius: '50%', backgroundColor: '#f0f0f0', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, color: '#888', flexShrink: 0, lineHeight: 1 }}
                         onMouseEnter={e => { e.currentTarget.style.backgroundColor = '#fdf2f5'; e.currentTarget.style.color = COR }}
                         onMouseLeave={e => { e.currentTarget.style.backgroundColor = '#f0f0f0'; e.currentTarget.style.color = '#888' }}>+</button>
+)}
                     </div>
                   </td>}
                   {vis('funcao')     && <td style={tdBase()}>{c.funcoes?.nome || '—'}</td>}
@@ -971,7 +976,7 @@ export default function BasePOPage() {
                     return <CelulaExame key={t.id} reg={reg} compacto={compacto} obrig={obrig}
                       onClick={() => setModalExame({ colab: c, reg, treinamento: t, abaInicial: 'info' })}
                       onIcone={tipo => setModalExame({ colab: c, reg, treinamento: t, abaInicial: tipo === 'documento' ? 'documento' : 'programacao' })}
-                      onClickNA={() => setModalNA({ colab: c, treinamento: t })}
+                      onClickNA={() => podeEditar && setModalNA({ colab: c, treinamento: t })}
                     />
                   })}
                 </tr>

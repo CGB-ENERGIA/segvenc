@@ -978,6 +978,7 @@ function ModalNovoASO({ colab, onClose, onSalvo }: { colab: Colaborador; onClose
 // ─── PÁGINA PRINCIPAL ─────────────────────────────────────────────────────────
 export default function MedTrabPage() {
   const router = useRouter(); const { usuario } = useAuth()
+  const podeEditar = usuario?.nivel !== 'visualizador'  // ← adicionar
   const [colabs, setColabs] = useState<Colaborador[]>([])
   const [bases, setBases] = useState<Base[]>([])
   const [loading, setLoading] = useState(true)
@@ -1180,7 +1181,7 @@ export default function MedTrabPage() {
         <BotaoExportar onClick={t => { const d = gerarExport(ordenados); t === 'csv' ? exportCSV(d) : exportXLSX(d) }} />
       </div>
 
-      {/* TABELA */}
+    {/* TABELA */}
       {loading ? <p style={{ color: '#888', fontSize: 14 }}>Carregando dados da tabela...</p>
         : <div style={{ overflowX: 'auto', overflowY: 'auto', maxHeight: 'calc(100vh - 230px)', borderRadius: 12, border: '1px solid #f0f0f0', flex: 1 }}>
           <table style={{ width: '100%', borderCollapse: 'separate', borderSpacing: 0, backgroundColor: 'white', fontSize: fs }}>
@@ -1223,42 +1224,44 @@ export default function MedTrabPage() {
                       <td style={{ ...tdBase(), ...stickyTd(bg, 110), width: COL_NOME, minWidth: COL_NOME }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                           <span style={{ fontWeight: 500, color: '#333', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: COL_NOME - 40 }}>{c.nome}</span>
-                          <button title="Novo ASO" onClick={e => { e.stopPropagation(); setModalNovo(c) }}
-                            style={{ width: 20, height: 20, borderRadius: '50%', backgroundColor: '#f0f0f0', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, color: '#888', flexShrink: 0, lineHeight: 1 }}
-                            onMouseEnter={e => { e.currentTarget.style.backgroundColor = '#fdf2f5'; e.currentTarget.style.color = COR }}
-                            onMouseLeave={e => { e.currentTarget.style.backgroundColor = '#f0f0f0'; e.currentTarget.style.color = '#888' }}>+</button>
+                          {podeEditar && (
+                            <button title="Novo ASO" onClick={e => { e.stopPropagation(); setModalNovo(c) }}
+                              style={{ width: 20, height: 20, borderRadius: '50%', backgroundColor: '#f0f0f0', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, color: '#888', flexShrink: 0, lineHeight: 1 }}
+                              onMouseEnter={e => { e.currentTarget.style.backgroundColor = '#fdf2f5'; e.currentTarget.style.color = COR }}
+                              onMouseLeave={e => { e.currentTarget.style.backgroundColor = '#f0f0f0'; e.currentTarget.style.color = '#888' }}>+</button>
+                          )}
                         </div>
                       </td>
-                     <td style={tdBase()}>{c.bases?.nome || '—'}</td>
-                     <td style={tdBase()}><span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 99, backgroundColor: c.situacao === 'ATIVO' ? '#f0fdf4' : '#f1f5f9', color: c.situacao === 'ATIVO' ? '#16a34a' : '#64748b' }}>{c.situacao}</span></td>
-                     <td style={tdBase()}>{c.funcoes?.nome || '—'}</td>
-                     <td style={tdBase()}>{c.processo || '—'}</td>
-                     <td style={tdBase({ textAlign: 'center' })}>{c.gse ?? '—'}</td>
-                     <td style={tdBase()}>{c.data_admissao ? new Date(c.data_admissao + 'T12:00:00').toLocaleDateString('pt-BR') : '—'}</td>
+                      <td style={tdBase()}>{c.bases?.nome || '—'}</td>
+                      <td style={tdBase()}><span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 99, backgroundColor: c.situacao === 'ATIVO' ? '#f0fdf4' : '#f1f5f9', color: c.situacao === 'ATIVO' ? '#16a34a' : '#64748b' }}>{c.situacao}</span></td>
+                      <td style={tdBase()}>{c.funcoes?.nome || '—'}</td>
+                      <td style={tdBase()}>{c.processo || '—'}</td>
+                      <td style={tdBase({ textAlign: 'center' })}>{c.gse ?? '—'}</td>
+                      <td style={tdBase()}>{c.data_admissao ? new Date(c.data_admissao + 'T12:00:00').toLocaleDateString('pt-BR') : '—'}</td>
                       <CelulaASOPrincipal colab={c} compacto={compacto}
                         onClick={() => { if (principal) setModalASO({ colab: c, aso: principal.aso, tipo: principal.aso.tipo, abaInicial: 'info' }) }}
-                        onCalendario={() => { if (principal) setModalASO({ colab: c, aso: principal.aso, tipo: principal.aso.tipo, abaInicial: 'programacao' }) }} />
+                        onCalendario={() => { if (principal && podeEditar) setModalASO({ colab: c, aso: principal.aso, tipo: principal.aso.tipo, abaInicial: 'programacao' }) }} />
                       <CelulaDias colab={c} compacto={compacto} />
                       {expandido && <>
                         <CelulaASODetalhe aso={asoAdm} tipo="admissional" compacto={compacto} isMaisRecente={principal?.aso === asoAdm}
                           onClick={() => setModalASO({ colab: c, aso: asoAdm, tipo: 'admissional', abaInicial: 'info' })}
-                          onCalendario={() => setModalASO({ colab: c, aso: asoAdm, tipo: 'admissional', abaInicial: 'programacao' })} />
+                          onCalendario={() => { if (podeEditar) setModalASO({ colab: c, aso: asoAdm, tipo: 'admissional', abaInicial: 'programacao' }) }} />
                         <CelulaASODetalhe aso={asoPer} tipo="periodico" compacto={compacto} isMaisRecente={principal?.aso === asoPer}
                           onClick={() => setModalASO({ colab: c, aso: asoPer, tipo: 'periodico', abaInicial: 'info' })}
-                          onCalendario={() => setModalASO({ colab: c, aso: asoPer, tipo: 'periodico', abaInicial: 'programacao' })} />
+                          onCalendario={() => { if (podeEditar) setModalASO({ colab: c, aso: asoPer, tipo: 'periodico', abaInicial: 'programacao' }) }} />
                         <CelulaASODetalhe aso={asoRet} tipo="retorno" compacto={compacto} isMaisRecente={principal?.aso === asoRet}
                           onClick={() => setModalASO({ colab: c, aso: asoRet, tipo: 'retorno', abaInicial: 'info' })}
-                          onCalendario={() => setModalASO({ colab: c, aso: asoRet, tipo: 'retorno', abaInicial: 'programacao' })} />
+                          onCalendario={() => { if (podeEditar) setModalASO({ colab: c, aso: asoRet, tipo: 'retorno', abaInicial: 'programacao' }) }} />
                         <CelulaASODetalhe aso={asoMRO} tipo="mudanca_risco" compacto={compacto} isMaisRecente={principal?.aso === asoMRO}
                           onClick={() => setModalASO({ colab: c, aso: asoMRO, tipo: 'mudanca_risco', abaInicial: 'info' })}
-                          onCalendario={() => setModalASO({ colab: c, aso: asoMRO, tipo: 'mudanca_risco', abaInicial: 'programacao' })} />
+                          onCalendario={() => { if (podeEditar) setModalASO({ colab: c, aso: asoMRO, tipo: 'mudanca_risco', abaInicial: 'programacao' }) }} />
                         <CelulaASODetalhe aso={asoDem} tipo="demissional" compacto={compacto} isMaisRecente={principal?.aso === asoDem}
                           onClick={() => setModalASO({ colab: c, aso: asoDem, tipo: 'demissional', abaInicial: 'info' })}
-                          onCalendario={() => setModalASO({ colab: c, aso: asoDem, tipo: 'demissional', abaInicial: 'programacao' })} />
+                          onCalendario={() => { if (podeEditar) setModalASO({ colab: c, aso: asoDem, tipo: 'demissional', abaInicial: 'programacao' }) }} />
                         {EXAMES_COMPL.map(e => {
                           const exame = c.exames_compl.find(x => x.nome_exame === e.nome)
                           return <CelulaExameCompl key={e.key} exame={exame} compacto={compacto}
-                            onClick={() => setModalExameCompl({ colab: c, nomeExame: e.nome, exame })} />
+                            onClick={() => { if (podeEditar) setModalExameCompl({ colab: c, nomeExame: e.nome, exame }) }} />
                         })}
                       </>}
                     </tr>
@@ -1270,8 +1273,8 @@ export default function MedTrabPage() {
 
       {/* MODAIS */}
       {modalASO && <ModalASO dados={{ colab: modalASO.colab, aso: modalASO.aso, tipo: modalASO.tipo }} abaInicial={modalASO.abaInicial} onClose={() => setModalASO(null)} onUpdate={() => buscarColabs(filtroSits)} email={usuario?.email || ''} podeAuditar={usuario?.pode_auditar || false} nivel={usuario?.nivel || 'visualizador'} />}
-      {modalNovo && <ModalNovoASO colab={modalNovo} onClose={() => setModalNovo(null)} onSalvo={() => { setModalNovo(null); buscarColabs(filtroSits) }} />}
-      {modalExameCompl && <ModalExameCompl colab={modalExameCompl.colab} nomeExame={modalExameCompl.nomeExame} exame={modalExameCompl.exame} onClose={() => setModalExameCompl(null)} onUpdate={() => { setModalExameCompl(null); buscarColabs(filtroSits) }} />}
+      {modalNovo && podeEditar && <ModalNovoASO colab={modalNovo} onClose={() => setModalNovo(null)} onSalvo={() => { setModalNovo(null); buscarColabs(filtroSits) }} />}
+      {modalExameCompl && podeEditar && <ModalExameCompl colab={modalExameCompl.colab} nomeExame={modalExameCompl.nomeExame} exame={modalExameCompl.exame} onClose={() => setModalExameCompl(null)} onUpdate={() => { setModalExameCompl(null); buscarColabs(filtroSits) }} />}
     </div>
   )
 }

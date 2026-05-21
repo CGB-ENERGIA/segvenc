@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useRef } from 'react'
 import { supabase } from '@/lib/supabase'
-import { pdf, Document, Page, View, Text, Image, StyleSheet, Font } from '@react-pdf/renderer'
+import { pdf, Document, Page, View, Text, Image, StyleSheet, Svg, Rect, Line } from '@react-pdf/renderer'
 
 const COR = '#9f183c'
 
@@ -13,7 +13,7 @@ interface Colaborador {
   data_admissao: string | null; data_nascimento: string | null
   estado_civil: string | null; cpf: string | null; rg: string | null
   rg_orgao: string | null; rg_uf: string | null; processo: string | null
-  base: string | null; numero_cnh: string | null
+  base: string | null; numero_cnh: string | null; sexo: string | null
 }
 interface ExameCompl { nome: string; ultima_data: string | null }
 interface RiscoOcupacional { acidente: string | null; ergonomico: string | null; fisico: string | null; quimico: string | null; biologico: string | null }
@@ -96,10 +96,19 @@ const S = StyleSheet.create({
 
 // ─── COMPONENTES PDF ──────────────────────────────────────────────────────────
 function CB({ checked }: { checked: boolean }) {
+  if (checked) {
+    return (
+      <Svg width={10} height={10} style={{ marginRight: 3 }}>
+        <Rect x="0.5" y="0.5" width="9" height="9" stroke="#333333" strokeWidth="0.8" fill="white" />
+        <Line x1="2" y1="2" x2="8" y2="8" stroke="#000000" strokeWidth="1.5" />
+        <Line x1="8" y1="2" x2="2" y2="8" stroke="#000000" strokeWidth="1.5" />
+      </Svg>
+    )
+  }
   return (
-    <View style={S.cb}>
-      {checked && <Text style={S.cbX}>X</Text>}
-    </View>
+    <Svg width={10} height={10} style={{ marginRight: 3 }}>
+      <Rect x="0.5" y="0.5" width="9" height="9" stroke="#333333" strokeWidth="0.8" fill="white" />
+    </Svg>
   )
 }
 function CampoVal({ label, valor, w, bold }: { label?: string; valor: string; w?: number; bold?: boolean }) {
@@ -144,8 +153,10 @@ function ASODocument({ form, empresa, medico }: { form: FormASO; empresa: Empres
 
   return (
     <Document>
-      <Page size="A4" style={S.page}>
-        <View style={S.borda}>
+      {/* O loop que repete a página 3 vezes */}
+      {[1, 2, 3].map((via) => (
+        <Page key={via} size="A4" style={S.page}>
+          <View style={S.borda}>
 
           {/* CABEÇALHO */}
           <View style={[S.row, { marginBottom: 4, borderBottom: '1pt solid #333', paddingBottom: 4 }]}>
@@ -221,7 +232,7 @@ function ASODocument({ form, empresa, medico }: { form: FormASO; empresa: Empres
               <View style={S.campo}><Text>{form.matricula}</Text></View>
             </View>
             <View style={{ width: 100, marginLeft: 6 }}>
-              <Text style={S.label}>Data de Nasc. (Dia/Mês/Ano)</Text>
+              <Text style={S.label}>Data de Nasc.</Text>
               <View style={S.campo}><Text>{form.data_nascimento}</Text></View>
             </View>
             <View style={{ width: 40, marginLeft: 6 }}>
@@ -330,33 +341,69 @@ function ASODocument({ form, empresa, medico }: { form: FormASO; empresa: Empres
             </View>
           </View>
 
-          {/* LOCAL E DATA */}
-          <View style={[S.row, { marginBottom: 8 }]}>
-            <View style={[S.campo, { width: 120 }]}><Text>{form.local}</Text></View>
-            <Text style={{ marginHorizontal: 4 }}> - </Text>
-            <View style={[S.campo, { width: 90 }]}><Text>{form.data_ass || '____/____/______'}</Text></View>
-          </View>
+   {/* LOCAL E DATA */}
+<View style={[S.row, { marginBottom: 8, alignItems: 'flex-end' }]}>
+  
+  {/* Campo para o Local (ex: Cidade) */}
+  <View style={[S.campo, { width: 140 }]}><Text>{form.local}</Text></View>
+
+  <Text style={{ marginHorizontal: 4, paddingBottom: 1 }}> - </Text>
+
+  {/* Linha em branco para UF ou complemento (opcional, remova se não precisar) */}
+  <View style={[S.campo, { width: 40 }]}><Text>{' '}</Text></View>
+
+  {/* Espaçamento antes da data */}
+  <View style={{ width: 24 }} />
+
+  {/* Linha em branco para o DIA */}
+  <View style={[S.campo, { width: 30 }]}><Text>{' '}</Text></View>
+
+  <Text style={{ marginHorizontal: 4, paddingBottom: 1 }}> / </Text>
+
+  {/* Linha em branco para o MÊS */}
+  <View style={[S.campo, { width: 30 }]}><Text>{' '}</Text></View>
+
+  <Text style={{ marginHorizontal: 4, paddingBottom: 1 }}> / </Text>
+
+  {/* Linha em branco para o ANO */}
+  <View style={[S.campo, { width: 40 }]}><Text>{' '}</Text></View>
+
+</View>
 
           {/* RECIBO */}
           <View style={{ borderBottom: '0.5pt solid #ccc', paddingBottom: 4, marginBottom: 8 }}>
             <Text>Recebi cópia do Atestado de Saúde Ocupacional - ASO</Text>
           </View>
 
-          {/* ASSINATURAS */}
-          <View style={[S.row, { gap: 12 }]}>
-            {[
-              { titulo: 'Trabalhador(a)', conteudo: [] },
-              { titulo: 'Médico Examinador', conteudo: [] },
-              { titulo: 'Médico Responsável pelo PCMSO', conteudo: [medico?.nome || '', medico?.especialidade || '', `CRM: ${medico?.crm || ''} . RQE N° ${medico?.rqe || ''}`, `FONE: ${medico?.telefone || ''}`] },
-            ].map((col, i) => (
-              <View key={i} style={{ flex: 1, borderTop: '0.8pt solid #333', paddingTop: 4, alignItems: 'center' }}>
-                <Text style={[S.bold, { fontSize: 7.5, marginBottom: 2 }]}>{col.titulo}</Text>
-                {col.conteudo.map((linha, j) => <Text key={j} style={{ fontSize: 7, textAlign: 'center' }}>{linha}</Text>)}
-              </View>
-            ))}
-          </View>
+{/* ASSINATURAS */}
+<View style={{ border: '0.8pt solid #333', marginBottom: 6 }}>
+  
+  {/* Cabeçalho */}
+  {/* Adicionado alignItems: 'stretch' aqui também para garantir linhas perfeitas */}
+  <View style={[S.row, { borderBottom: '0.8pt solid #333', alignItems: 'stretch' }]}>
+    {['Trabalhador(a)', 'Médico Examinador', 'Médico Responsável pelo PCMSO'].map((titulo, i) => (
+      <View key={i} style={{ flex: 1, padding: '3 4', borderRight: i < 2 ? '0.8pt solid #333' : undefined }}>
+        <Text style={[S.bold, { fontSize: 7.5 }]}>{titulo}</Text>
+      </View>
+    ))}
+  </View>
+  
+  {/* Corpo */}
+  <View style={[S.row, { minHeight: 50, alignItems: 'stretch' }]}>
+    <View style={{ flex: 1, borderRight: '0.8pt solid #333', padding: 4 }} />
+    <View style={{ flex: 1, borderRight: '0.8pt solid #333', padding: 4 }} />
+    
+    {/* Terceira coluna com os dados do médico */}
+    <View style={{ flex: 1, padding: 4, alignItems: 'center' }}>
+      {[medico?.nome || '', medico?.especialidade || '', `CRM: ${medico?.crm || ''} . RQE N° ${medico?.rqe || ''}`, `FONE: ${medico?.telefone || ''}`].map((linha, j) => (
+        <Text key={j} style={{ fontSize: 7, textAlign: 'center' }}>{linha}</Text>
+      ))}
+    </View>
+  </View>
+  
+</View>
 
-          {/* RODAPÉ */}
+{/* RODAPÉ */}
           <View style={{ borderTop: '0.5pt solid #ccc', paddingTop: 4, marginTop: 8 }}>
             <Text style={[S.italic, { fontSize: 6.5, color: '#555' }]}>
               NB. Os dados dos exames clínicos e complementares deverão ser registrados em prontuário médico individual sob a responsabilidade do médico responsável pelo PCMSO, ou do médico responsável pelo exame, quando a organização estiver dispensada de PCMSO. NR7.6.1.
@@ -365,6 +412,7 @@ function ASODocument({ form, empresa, medico }: { form: FormASO; empresa: Empres
 
         </View>
       </Page>
+      ))}
     </Document>
   )
 }
@@ -421,18 +469,19 @@ export default function GerarASOPage() {
     setResultados([])
     setBusca(nome)
     const { data: c } = await supabase.from('colaboradores')
-      .select('matricula, nome, funcao_id, gse, situacao, data_admissao, data_nascimento, estado_civil, cpf, rg, rg_orgao, rg_uf, processo, funcoes(nome), bases(nome)')
+      .select('matricula, nome, funcao_id, gse, situacao, data_admissao, data_nascimento, estado_civil, cpf, rg, rg_orgao, rg_uf, processo, sexo, funcoes(nome), bases(nome)')
       .eq('matricula', mat).single()
     if (!c) return
     const gseSetor = c?.gse ? (await supabase.from('gses').select('setor').eq('id', c.gse).single()).data?.setor : null
     const cnh = await supabase.from('cnhs').select('numero_cnh').eq('matricula_colaborador', mat).eq('is_atual', true).maybeSingle()
     const colab: Colaborador = {
-      matricula: c.matricula, nome: c.nome, funcao: (c as any).funcoes?.nome || null,
-      funcao_id: c.funcao_id, gse: c.gse, gse_setor: gseSetor || null,
-      situacao: c.situacao, data_admissao: c.data_admissao, data_nascimento: c.data_nascimento,
-      estado_civil: c.estado_civil, cpf: c.cpf, rg: c.rg, rg_orgao: c.rg_orgao, rg_uf: c.rg_uf,
-      processo: c.processo, base: (c as any).bases?.nome || null, numero_cnh: cnh.data?.numero_cnh || null,
-    }
+       matricula: c.matricula, nome: c.nome, funcao: (c as any).funcoes?.nome || null,
+       funcao_id: c.funcao_id, gse: c.gse, gse_setor: gseSetor || null,
+       situacao: c.situacao, data_admissao: c.data_admissao, data_nascimento: c.data_nascimento,
+       estado_civil: c.estado_civil, cpf: c.cpf, rg: c.rg, rg_orgao: c.rg_orgao, rg_uf: c.rg_uf,
+       processo: c.processo, base: (c as any).bases?.nome || null, numero_cnh: cnh.data?.numero_cnh || null,
+       sexo: (c as any).sexo || null,
+}
     await preencherForm(colab, tipoASO)
     await buscarExames(colab, tipoASO)
     setColabSel(colab)
@@ -452,7 +501,7 @@ export default function GerarASOPage() {
       nome: colab.nome, matricula: colab.matricula,
       data_nascimento: formatarData(colab.data_nascimento),
       idade: idade !== null ? String(idade) : '',
-      sexo: '', estado_civil: colab.estado_civil || '',
+      sexo: colab.sexo || '', estado_civil: colab.estado_civil || '',
       data_admissao: formatarData(colab.data_admissao),
       funcao: colab.funcao || '', conducao: colab.numero_cnh ? 'SIM' : 'NÃO',
       rg: colab.rg || '', rg_orgao: colab.rg_orgao || '', rg_uf: colab.rg_uf || '',
@@ -463,7 +512,7 @@ export default function GerarASOPage() {
       risco_biologico: !naoSeAplica(riscos.biologico), risco_biologico_desc: riscos.biologico || '',
       risco_ergonomico: !naoSeAplica(riscos.ergonomico), risco_ergonomico_desc: riscos.ergonomico || '',
       risco_acidente: !naoSeAplica(riscos.acidente), risco_acidente_desc: riscos.acidente || '',
-      local: colab.base || empresa?.cidade || '',
+      local: '',
     }))
   }
 
@@ -646,7 +695,7 @@ export default function GerarASOPage() {
           <div style={{ display: 'flex', gap: 6, marginBottom: 3 }}>
             <Campo label="Nome:" valor={form.nome} onChange={v => setForm(f => ({ ...f, nome: v }))} bold flex={1} />
             <Campo label="Matr.:" valor={form.matricula} onChange={v => setForm(f => ({ ...f, matricula: v }))} w={70} />
-            <Campo label="Data de Nasc. (Dia/Mês/Ano)" valor={form.data_nascimento} onChange={v => setForm(f => ({ ...f, data_nascimento: v }))} w={100} />
+            <Campo label="Data de Nasc." valor={form.data_nascimento} onChange={v => setForm(f => ({ ...f, data_nascimento: v }))} w={100} />
             <Campo label="Idade:" valor={form.idade} onChange={v => setForm(f => ({ ...f, idade: v }))} w={35} />
           </div>
 
@@ -749,29 +798,61 @@ export default function GerarASOPage() {
             </table>
           </div>
 
-          {/* LOCAL/DATA */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8, fontSize: 9 }}>
-            <Campo label="" valor={form.local} onChange={v => setForm(f => ({ ...f, local: v }))} w={120} />
-            <span> - </span>
-            <Campo label="" valor={form.data_ass} onChange={v => setForm(f => ({ ...f, data_ass: v }))} w={90} />
-          </div>
+    {/* LOCAL E DATA (Para impressão) */}
+<div style={{ display: 'flex', alignItems: 'flex-end', marginBottom: 8, fontSize: 9 }}>
+  
+  {/* Campo editável para o Local */}
+  <input 
+    value={form.local} 
+    onChange={e => setForm(f => ({ ...f, local: e.target.value }))}
+    style={{ width: 140, border: 'none', borderBottom: '1px solid #333', outline: 'none', fontSize: 9, background: 'transparent', padding: '1px 2px' }} 
+  />
+  
+  {/* Separador */}
+  <span style={{ marginBottom: 2, marginLeft: 8, marginRight: 8 }}> - </span>
+  {/* Espaço em branco para o DIA (para preencher à mão) */}
+  <div style={{ width: 30, borderBottom: '1px solid #333', height: 14 }}></div>
+  {/* Barra */}
+  <span style={{ marginBottom: 2, marginLeft: 4, marginRight: 4 }}> / </span>
+  {/* Espaço em branco para o MÊS (para preencher à mão) */}
+  <div style={{ width: 30, borderBottom: '1px solid #333', height: 14 }}></div>
+  {/* Barra */}
+  <span style={{ marginBottom: 2, marginLeft: 4, marginRight: 4 }}> / </span>
+  {/* Espaço em branco para o ANO (para preencher à mão) */}
+  <div style={{ width: 40, borderBottom: '1px solid #333', height: 14 }}></div>
+
+</div>
 
           {/* RECIBO */}
           <div style={{ borderBottom: '1px solid #ccc', paddingBottom: 4, marginBottom: 8, fontSize: 9 }}>Recebi cópia do Atestado de Saúde Ocupacional - ASO</div>
 
-          {/* ASSINATURAS */}
-          <div style={{ display: 'flex', gap: 12, marginBottom: 8 }}>
-            {[
-              { titulo: 'Trabalhador(a)', linhas: [] },
-              { titulo: 'Médico Examinador', linhas: [] },
-              { titulo: 'Médico Responsável pelo PCMSO', linhas: [medico?.nome || '', medico?.especialidade || '', `CRM: ${medico?.crm || ''} . RQE N° ${medico?.rqe || ''}`, `FONE: ${medico?.telefone || ''}`] },
-            ].map((col, i) => (
-              <div key={i} style={{ flex: 1, borderTop: '1px solid #333', paddingTop: 4, fontSize: 9, textAlign: 'center' }}>
-                <strong>{col.titulo}</strong>
-                {col.linhas.map((l, j) => <div key={j}>{l}</div>)}
-              </div>
-            ))}
-          </div>
+{/* ASSINATURAS */}
+<table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 9, marginBottom: 8, border: '1px solid #333' }}>
+  <thead>
+    <tr>
+      {[
+        { titulo: 'Trabalhador(a)', linhas: [] },
+        { titulo: 'Médico Examinador', linhas: [] },
+        { titulo: 'Médico Responsável pelo PCMSO', linhas: [medico?.nome || '', medico?.especialidade || '', `CRM: ${medico?.crm || ''} . RQE N° ${medico?.rqe || ''}`, `FONE: ${medico?.telefone || ''}`] },
+      ].map((col, i) => (
+        <th key={i} style={{ border: '1px solid #333', padding: '3px 6px', fontWeight: 700, textAlign: 'left', width: '33.33%' }}>
+          {col.titulo}
+        </th>
+      ))}
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td style={{ border: '1px solid #333', height: 50, padding: '3px 6px', verticalAlign: 'top' }}></td>
+      <td style={{ border: '1px solid #333', height: 50, padding: '3px 6px', verticalAlign: 'top' }}></td>
+      <td style={{ border: '1px solid #333', padding: '3px 6px', verticalAlign: 'top', textAlign: 'center' }}>
+        {[medico?.nome || '', medico?.especialidade || '', `CRM: ${medico?.crm || ''} . RQE N° ${medico?.rqe || ''}`, `FONE: ${medico?.telefone || ''}`].map((l, j) => (
+          <div key={j}>{l}</div>
+        ))}
+      </td>
+    </tr>
+  </tbody>
+</table>
 
           {/* RODAPÉ */}
           <div style={{ borderTop: '1px solid #ccc', paddingTop: 4, fontSize: 8, color: '#555', fontStyle: 'italic' }}>

@@ -380,25 +380,30 @@ function ModalCNH({ colab, cnh, onClose, onUpdate, nivel }: {
           )}
 
           {aba === 'documento' && (
-            <div>
-              {cnh?.url_arquivo
-                ? <div style={{ marginBottom: 24 }}><p style={{ fontSize: 13, fontWeight: 600, color: '#333', margin: '0 0 12px' }}>Documento atual</p>
-                    <a href={cnh.url_arquivo} target="_blank" rel="noreferrer" style={{ display: 'flex', alignItems: 'center', gap: 10, padding: 16, backgroundColor: '#eff6ff', borderRadius: 10, border: '1px solid #bfdbfe', color: '#2563eb', textDecoration: 'none', fontSize: 13, fontWeight: 500 }}>
-                      <Icone tipo="olho" cor="#2563eb" size={18} />Visualizar documento
-                    </a>
-                  </div>
-                : <div style={{ marginBottom: 24, padding: 16, backgroundColor: '#fffbeb', borderRadius: 10, border: '1px solid #fde68a' }}><p style={{ fontSize: 13, color: '#92400e', margin: 0 }}>⚠️ Nenhum documento anexado ainda.</p></div>}
-              <p style={{ fontSize: 13, fontWeight: 600, color: '#333', margin: '0 0 12px' }}>{cnh?.url_arquivo ? 'Substituir documento' : 'Anexar documento'}</p>
-              <div onClick={() => fileRef.current?.click()} style={{ border: '2px dashed #e0e0e0', borderRadius: 10, padding: '28px 20px', textAlign: 'center', cursor: 'pointer', backgroundColor: '#fafafa' }}>
-                <Icone tipo="upload" cor="#aaa" size={28} />
-                <p style={{ fontSize: 13, color: '#888', margin: '8px 0 4px' }}>{arquivo ? arquivo.name : 'Clique para selecionar'}</p>
-                <p style={{ fontSize: 11, color: '#bbb', margin: 0 }}>PDF, JPG ou PNG · Máx. 10MB</p>
-                <input ref={fileRef} type="file" accept=".pdf,.jpg,.jpeg,.png" style={{ display: 'none' }} onChange={e => setArquivo(e.target.files?.[0] || null)} />
-              </div>
-              {arquivo && (
-                <button onClick={salvar} disabled={salvando} style={{ width: '100%', marginTop: 16, height: 40, backgroundColor: COR, color: 'white', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 500, cursor: salvando ? 'not-allowed' : 'pointer', opacity: salvando ? 0.7 : 1 }}>{salvando ? 'Enviando...' : 'Enviar documento'}</button>
+  <div>
+    {cnh?.url_arquivo
+      ? <div style={{ marginBottom: 24 }}><p style={{ fontSize: 13, fontWeight: 600, color: '#333', margin: '0 0 12px' }}>Documento atual</p>
+          <a href={cnh.url_arquivo} target="_blank" rel="noreferrer" style={{ display: 'flex', alignItems: 'center', gap: 10, padding: 16, backgroundColor: '#eff6ff', borderRadius: 10, border: '1px solid #bfdbfe', color: '#2563eb', textDecoration: 'none', fontSize: 13, fontWeight: 500 }}>
+            <Icone tipo="olho" cor="#2563eb" size={18} />Visualizar documento
+          </a>
+        </div>
+      : <div style={{ marginBottom: 24, padding: 16, backgroundColor: '#fffbeb', borderRadius: 10, border: '1px solid #fde68a' }}><p style={{ fontSize: 13, color: '#92400e', margin: 0 }}>⚠️ Nenhum documento anexado ainda.</p></div>}
+
+    {nivel !== 'visualizador' && (
+      <>
+        <p style={{ fontSize: 13, fontWeight: 600, color: '#333', margin: '0 0 12px' }}>{cnh?.url_arquivo ? 'Substituir documento' : 'Anexar documento'}</p>
+        <div onClick={() => fileRef.current?.click()} style={{ border: '2px dashed #e0e0e0', borderRadius: 10, padding: '28px 20px', textAlign: 'center', cursor: 'pointer', backgroundColor: '#fafafa' }}>
+          <Icone tipo="upload" cor="#aaa" size={28} />
+          <p style={{ fontSize: 13, color: '#888', margin: '8px 0 4px' }}>{arquivo ? arquivo.name : 'Clique para selecionar'}</p>
+          <p style={{ fontSize: 11, color: '#bbb', margin: 0 }}>PDF, JPG ou PNG · Máx. 10MB</p>
+          <input ref={fileRef} type="file" accept=".pdf,.jpg,.jpeg,.png" style={{ display: 'none' }} onChange={e => setArquivo(e.target.files?.[0] || null)} />
+        </div>
+        {arquivo && (
+          <button onClick={salvar} disabled={salvando} style={{ width: '100%', marginTop: 16, height: 40, backgroundColor: COR, color: 'white', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 500, cursor: salvando ? 'not-allowed' : 'pointer', opacity: salvando ? 0.7 : 1 }}>{salvando ? 'Enviando...' : 'Enviar documento'}</button>
               )}
-            </div>
+            </>
+           )}
+         </div>
           )}
         </div>
       </div>
@@ -562,6 +567,7 @@ function ModalNovaCNH({ onClose, onSalvo }: { onClose: () => void; onSalvo: () =
 // ─── PÁGINA PRINCIPAL ─────────────────────────────────────────────────────────
 export default function CNHPage() {
   const router = useRouter(); const { usuario } = useAuth()
+  const podeEditar = usuario?.nivel !== 'visualizador'  // ← adicionar
   const [colabs, setColabs] = useState<ColabCNH[]>([])
   const [bases, setBases] = useState<Base[]>([])
   const [loading, setLoading] = useState(true)

@@ -403,7 +403,7 @@ function ModalExame({ dados, abaInicial, onClose, onUpdate, email, podeAuditar, 
   async function salvarAud() { if (!reg) return; if (!formAud.validado && !formAud.observacao) { setErrAud('Informe o motivo.'); return } setSalvAud(true); setErrAud(''); const { error } = await supabase.from('logs_auditoria').insert({ registro_id: reg.id, auditor_email: email, validado: formAud.validado, observacao: formAud.observacao || null, data_auditoria: new Date().toISOString() }); if (error) { setErrAud(error.message); setSalvAud(false); return } setSalvAud(false); onUpdate(); onClose() }
   async function excluir() { if (!reg) return; if (confNome !== nr.nome) { setErrExc('Nome não confere.'); return } setExcluindo(true); const { error } = await supabase.from('registros_exames').delete().eq('id', reg.id); if (error) { setErrExc(error.message); setExcluindo(false); return } onUpdate(); onClose() }
   const auds = [...(reg?.logs_auditoria || [])].sort((a, b) => new Date(b.data_auditoria).getTime() - new Date(a.data_auditoria).getTime())
-  const abas: { key: AbaModal; label: string }[] = [{ key: 'info', label: 'Informações' }, { key: 'documento', label: 'Documento' }, { key: 'programacao', label: 'Programação' }, ...(podeAuditar ? [{ key: 'auditoria' as AbaModal, label: 'Auditoria' }] : [])]
+  const abas: { key: AbaModal; label: string }[] = [ { key: 'info', label: 'Informações' },...(nivel !== 'visualizador' ? [{ key: 'documento' as AbaModal, label: 'Documento' },{ key: 'programacao' as AbaModal, label: 'Programação' }, ] : []),...(podeAuditar ? [{ key: 'auditoria' as AbaModal, label: 'Auditoria' }] : [])]
   const inp: React.CSSProperties = { width: '100%', height: 38, border: '1px solid #e0e0e0', borderRadius: 8, padding: '0 12px', fontSize: 13, boxSizing: 'border-box', outline: 'none' }
   return (
     // ─── zIndex 300: sempre acima dos th sticky (110) ─────────────────────────
@@ -495,6 +495,7 @@ function ModalExame({ dados, abaInicial, onClose, onUpdate, email, podeAuditar, 
 // ─── PÁGINA PRINCIPAL ─────────────────────────────────────────────────────────
 export default function BaseNRPage() {
   const router = useRouter(); const { usuario } = useAuth()
+  const podeEditar = usuario?.nivel !== 'visualizador'  // ← adicionar
   const [colabs, setColabs] = useState<Colaborador[]>([])
   const [nrs, setNrs] = useState<NR[]>([])
   const [bases, setBases] = useState<Base[]>([])
@@ -774,10 +775,12 @@ return getStatus(r.data_vencimento!) === filtroStatus
                   {vis('nome') && <td style={{ ...tdBase(), ...stickyTd(bg, leftNome), width: COL_NOME, minWidth: COL_NOME }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                       <span style={{ fontWeight: 500, color: '#333', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: COL_NOME - 40 }}>{c.nome}</span>
-                      <button title="Novo treinamento NR" onClick={e => { e.stopPropagation(); setModalNovo(c) }}
-                        style={{ width: 20, height: 20, borderRadius: '50%', backgroundColor: '#f0f0f0', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, color: '#888', flexShrink: 0, lineHeight: 1 }}
-                        onMouseEnter={e => { e.currentTarget.style.backgroundColor = '#fdf2f5'; e.currentTarget.style.color = COR }}
-                        onMouseLeave={e => { e.currentTarget.style.backgroundColor = '#f0f0f0'; e.currentTarget.style.color = '#888' }}>+</button>
+                     {podeEditar && (
+                    <button title="Novo treinamento NR" onClick={e => { e.stopPropagation(); setModalNovo(c) }}
+                     style={{ width: 20, height: 20, borderRadius: '50%', backgroundColor: '#f0f0f0', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, color: '#888', flexShrink: 0, lineHeight: 1 }}
+                     onMouseEnter={e => { e.currentTarget.style.backgroundColor = '#fdf2f5'; e.currentTarget.style.color = COR }}
+                    onMouseLeave={e => { e.currentTarget.style.backgroundColor = '#f0f0f0'; e.currentTarget.style.color = '#888' }}>+</button>
+)}
                     </div>
                   </td>}
                   {vis('funcao') && <td style={tdBase()}>{c.funcoes?.nome || '—'}</td>}

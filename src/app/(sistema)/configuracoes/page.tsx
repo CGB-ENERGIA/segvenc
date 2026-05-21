@@ -30,9 +30,10 @@ const MODULOS = [
   { chave: 'colaboradores', label: 'Colaboradores' },
   { chave: 'matriz', label: 'Matriz de Competências' },
   { chave: 'medicina', label: 'Medicina do Trabalho' },
+  { chave: 'cnh', label: 'CNH' },
   { chave: 'auditoria', label: 'Auditoria' },
+  { chave: 'gerar_aso', label: 'Gerar ASO' },
   { chave: 'configuracoes', label: 'Configurações' },
-  { chave: 'gerar_aso', label: 'Gerar ASO' }
 ]
 const NRS_ALVO = ['NR 10-B', 'NR 11', 'NR 12 - II', 'NR 12 - V', 'NR 12 - XII', 'NR 35']
 
