@@ -82,6 +82,26 @@ function statusLabel(s: StatusCNH): string {
 }
 function primeiroNome(s: string | null) { return s ? s.trim().split(' ')[0] : '—' }
 
+// HELPER R2: Gera URL Assinada e abre o documento
+async function visualizarDocumento(e: React.MouseEvent, urlOuKey: string) {
+  e.preventDefault()
+  try {
+    let key = urlOuKey
+    // Tratamento de compatibilidade para os dados antigos que estão no banco
+    if (key.includes('supabase.co')) {
+      const parts = key.split('documentos/')
+      if (parts.length > 1) key = parts[1]
+    }
+    const res = await fetch(`/api/r2/signed-url?key=${encodeURIComponent(key)}`)
+    const data = await res.json()
+    if (data.url) window.open(data.url, '_blank')
+    else alert('Erro ao gerar link de visualização.')
+  } catch (err) {
+    console.error(err)
+    alert('Erro ao abrir o documento.')
+  }
+}
+
 // ─── EXPORTAÇÃO ───────────────────────────────────────────────────────────────
 function gerarExport(colabs: ColabCNH[]) {
   return colabs.map(c => ({
@@ -244,14 +264,22 @@ function ModalCNH({ colab, cnh, onClose, onUpdate, nivel }: {
     setSalvando(true); setErro('')
     try {
       let urlArquivo: string | null = cnh?.url_arquivo || null
+      
+      // Upload R2
       if (arquivo) {
         const ext = arquivo.name.split('.').pop()
         const path = `cnhs/${colab.matricula}/${Date.now()}.${ext}`
-        const { error: uploadErr } = await supabase.storage.from('documentos').upload(path, arquivo)
-        if (uploadErr) throw uploadErr
-        const { data: urlData } = supabase.storage.from('documentos').getPublicUrl(path)
-        urlArquivo = urlData.publicUrl
+        
+        const formData = new FormData()
+        formData.append('file', arquivo)
+        formData.append('key', path)
+        
+        const res = await fetch('/api/r2/upload', { method: 'POST', body: formData })
+        if (!res.ok) throw new Error('Falha no upload do documento')
+        
+        urlArquivo = path
       }
+
       const payload = {
         matricula_colaborador: colab.matricula,
         numero_cnh: form.numero_cnh || null,
@@ -383,7 +411,7 @@ function ModalCNH({ colab, cnh, onClose, onUpdate, nivel }: {
   <div>
     {cnh?.url_arquivo
       ? <div style={{ marginBottom: 24 }}><p style={{ fontSize: 13, fontWeight: 600, color: '#333', margin: '0 0 12px' }}>Documento atual</p>
-          <a href={cnh.url_arquivo} target="_blank" rel="noreferrer" style={{ display: 'flex', alignItems: 'center', gap: 10, padding: 16, backgroundColor: '#eff6ff', borderRadius: 10, border: '1px solid #bfdbfe', color: '#2563eb', textDecoration: 'none', fontSize: 13, fontWeight: 500 }}>
+          <a href="#" onClick={(e) => visualizarDocumento(e, cnh.url_arquivo!)} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: 16, backgroundColor: '#eff6ff', borderRadius: 10, border: '1px solid #bfdbfe', color: '#2563eb', textDecoration: 'none', fontSize: 13, fontWeight: 500 }}>
             <Icone tipo="olho" cor="#2563eb" size={18} />Visualizar documento
           </a>
         </div>
@@ -439,14 +467,22 @@ function ModalNovaCNH({ onClose, onSalvo }: { onClose: () => void; onSalvo: () =
     setSalvando(true); setErro('')
     try {
       let urlArquivo: string | null = null
+      
+      // Upload R2
       if (arquivo) {
         const ext = arquivo.name.split('.').pop()
         const path = `cnhs/${colabSel.matricula}/${Date.now()}.${ext}`
-        const { error: uploadErr } = await supabase.storage.from('documentos').upload(path, arquivo)
-        if (uploadErr) throw uploadErr
-        const { data: urlData } = supabase.storage.from('documentos').getPublicUrl(path)
-        urlArquivo = urlData.publicUrl
+        
+        const formData = new FormData()
+        formData.append('file', arquivo)
+        formData.append('key', path)
+        
+        const res = await fetch('/api/r2/upload', { method: 'POST', body: formData })
+        if (!res.ok) throw new Error('Falha no upload do documento')
+        
+        urlArquivo = path
       }
+
       const { error } = await supabase.from('cnhs').insert({
         matricula_colaborador: colabSel.matricula,
         numero_cnh: form.numero_cnh || null,

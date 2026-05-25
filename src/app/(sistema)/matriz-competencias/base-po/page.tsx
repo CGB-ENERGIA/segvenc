@@ -87,6 +87,26 @@ function calcStats(colabs: Colaborador[], treinamentos: Treinamento[]) {
 }
 const hoje = new Date().toISOString().split('T')[0]
 
+// HELPER R2: Gera URL Assinada e abre o documento
+async function visualizarDocumento(e: React.MouseEvent, urlOuKey: string) {
+  e.preventDefault()
+  try {
+    let key = urlOuKey
+    // Tratamento de compatibilidade para os dados antigos que estão no banco
+    if (key.includes('supabase.co')) {
+      const parts = key.split('documentos/')
+      if (parts.length > 1) key = parts[1]
+    }
+    const res = await fetch(`/api/r2/signed-url?key=${encodeURIComponent(key)}`)
+    const data = await res.json()
+    if (data.url) window.open(data.url, '_blank')
+    else alert('Erro ao gerar link de visualização.')
+  } catch (err) {
+    console.error(err)
+    alert('Erro ao abrir o documento.')
+  }
+}
+
 // ─── EXPORTAÇÃO ──────────────────────────────────────────────────────────────
 function gerarExport(colabs: Colaborador[], treinamentos: Treinamento[]) {
   return colabs.map(c => {
@@ -356,6 +376,7 @@ function ModalNovoExame({ colab, treinamentos, onClose, onUpdate, email, treinam
       setForm(f => ({ ...f, data_vencimento: d.toISOString().split('T')[0] }))
     }
   }, [form.regra_id, form.data_realizacao, tSel])
+  
   async function salvar() {
     if (!form.regra_id || !form.data_realizacao) { setErro('Preencha o treinamento e a data.'); return }
     setSalvando(true); setErro('')
@@ -363,11 +384,20 @@ function ModalNovoExame({ colab, treinamentos, onClose, onUpdate, email, treinam
       await supabase.from('registros_exames').update({ is_atual: false }).eq('matricula_colaborador', colab.matricula).eq('regra_id', parseInt(form.regra_id))
       const { data: novo, error: e } = await supabase.from('registros_exames').insert({ matricula_colaborador: colab.matricula, regra_id: parseInt(form.regra_id), data_realizacao: form.data_realizacao, data_vencimento: form.data_vencimento, is_atual: true }).select().single()
       if (e) throw new Error(e.message)
+      
+      // Upload para R2
       if (arquivo && novo) {
         const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19); const ext = arquivo.name.split('.').pop()
         const path = `${colab.matricula}/${form.regra_id}/${ts}.${ext}`
-        const { error: se } = await supabase.storage.from('documentos').upload(path, arquivo, { upsert: false })
-        if (!se) { const { data: u } = supabase.storage.from('documentos').getPublicUrl(path); await supabase.from('registros_exames').update({ url_arquivo: u.publicUrl }).eq('id', novo.id) }
+        
+        const formData = new FormData()
+        formData.append('file', arquivo)
+        formData.append('key', path)
+        
+        const res = await fetch('/api/r2/upload', { method: 'POST', body: formData })
+        if (!res.ok) throw new Error('Falha no upload do documento')
+        
+        await supabase.from('registros_exames').update({ url_arquivo: path }).eq('id', novo.id)
       }
       onUpdate(); onClose()
     } catch (e: any) { setErro(e.message || 'Erro ao salvar') }
@@ -444,7 +474,36 @@ function ModalExame({ dados, abaInicial, onClose, onUpdate, email, podeAuditar, 
   }
 
   async function salvarProg() { if (!reg || !formProg.data_programada) { setErrProg('Informe a data.'); return } setSalvProg(true); setErrProg(''); const { error } = await supabase.from('programacoes_exames').insert({ registro_id: reg.id, matricula_colaborador: colab.matricula, regra_id: treinamento.id, data_programada: formProg.data_programada, observacao: formProg.observacao || null, criado_por: email }); if (error) { setErrProg(error.message); setSalvProg(false); return } setFormProg({ data_programada: '', observacao: '' }); setSalvProg(false); loadProgramacoes(); onUpdate() }
-  async function fazerUpload() { if (!arquivo || !reg) return; setUploading(true); setErrUp(''); const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19); const ext = arquivo.name.split('.').pop(); const path = `${colab.matricula}/${treinamento.id}/${ts}.${ext}`; const { error: se } = await supabase.storage.from('documentos').upload(path, arquivo, { upsert: false }); if (se) { setErrUp(se.message); setUploading(false); return }; const { data: u } = supabase.storage.from('documentos').getPublicUrl(path); const { error: de } = await supabase.from('registros_exames').update({ url_arquivo: u.publicUrl }).eq('id', reg.id); if (de) { setErrUp(de.message); setUploading(false); return }; setArquivo(null); setUploading(false); onUpdate(); onClose() }
+  
+  // Upload modificado para R2
+  async function fazerUpload() {
+    if (!arquivo || !reg) return;
+    setUploading(true); setErrUp('');
+    const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    const ext = arquivo.name.split('.').pop();
+    const path = `${colab.matricula}/${treinamento.id}/${ts}.${ext}`;
+    
+    try {
+      const formData = new FormData();
+      formData.append('file', arquivo);
+      formData.append('key', path);
+      
+      const res = await fetch('/api/r2/upload', { method: 'POST', body: formData });
+      if (!res.ok) throw new Error('Falha no upload para o R2');
+      
+      const { error: de } = await supabase.from('registros_exames').update({ url_arquivo: path }).eq('id', reg.id);
+      if (de) throw de;
+      
+      setArquivo(null);
+      onUpdate();
+      onClose();
+    } catch (e: any) {
+      setErrUp(e.message || 'Erro no envio');
+    } finally {
+      setUploading(false);
+    }
+  }
+
   async function salvarAud() { if (!reg) return; if (!formAud.validado && !formAud.observacao) { setErrAud('Informe o motivo.'); return } setSalvAud(true); setErrAud(''); const { error } = await supabase.from('logs_auditoria').insert({ registro_id: reg.id, auditor_email: email, validado: formAud.validado, observacao: formAud.observacao || null, data_auditoria: new Date().toISOString() }); if (error) { setErrAud(error.message); setSalvAud(false); return } setSalvAud(false); onUpdate(); onClose() }
   async function excluir() { if (!reg) return; if (confNome !== treinamento.nome) { setErrExc('Nome não confere.'); return } setExcluindo(true); const { error } = await supabase.from('registros_exames').delete().eq('id', reg.id); if (error) { setErrExc(error.message); setExcluindo(false); return } onUpdate(); onClose() }
 
@@ -507,7 +566,7 @@ function ModalExame({ dados, abaInicial, onClose, onUpdate, email, podeAuditar, 
 
           {/* ── DOCUMENTO ── */}
           {aba === 'documento' && <div>
-            {reg?.url_arquivo ? <div style={{ marginBottom: 24 }}><p style={{ fontSize: 13, fontWeight: 600, color: '#333', margin: '0 0 12px' }}>Documento atual</p><a href={reg.url_arquivo} target="_blank" rel="noreferrer" style={{ display: 'flex', alignItems: 'center', gap: 10, padding: 16, backgroundColor: '#eff6ff', borderRadius: 10, border: '1px solid #bfdbfe', color: '#2563eb', textDecoration: 'none', fontSize: 13, fontWeight: 500 }}><Icone tipo="olho" cor="#2563eb" size={18} />Visualizar documento</a></div>
+            {reg?.url_arquivo ? <div style={{ marginBottom: 24 }}><p style={{ fontSize: 13, fontWeight: 600, color: '#333', margin: '0 0 12px' }}>Documento atual</p><a href="#" onClick={(e) => visualizarDocumento(e, reg.url_arquivo!)} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: 16, backgroundColor: '#eff6ff', borderRadius: 10, border: '1px solid #bfdbfe', color: '#2563eb', textDecoration: 'none', fontSize: 13, fontWeight: 500 }}><Icone tipo="olho" cor="#2563eb" size={18} />Visualizar documento</a></div>
               : <div style={{ marginBottom: 24, padding: 16, backgroundColor: '#fffbeb', borderRadius: 10, border: '1px solid #fde68a' }}><p style={{ fontSize: 13, color: '#92400e', margin: 0 }}>⚠️ Nenhum documento anexado ainda.</p></div>}
             {!reg && <p style={{ fontSize: 13, color: '#aaa', marginBottom: 16 }}>Registre o treinamento antes de anexar documento.</p>}
             {reg && <><p style={{ fontSize: 13, fontWeight: 600, color: '#333', margin: '0 0 12px' }}>{reg.url_arquivo ? 'Substituir documento' : 'Anexar documento'}</p>
@@ -541,7 +600,7 @@ function ModalExame({ dados, abaInicial, onClose, onUpdate, email, podeAuditar, 
 
           {/* ── AUDITORIA ── */}
           {aba === 'auditoria' && podeAuditar && <div>
-            {reg?.url_arquivo ? <a href={reg.url_arquivo} target="_blank" rel="noreferrer" style={{ display: 'flex', alignItems: 'center', gap: 10, padding: 14, backgroundColor: '#eff6ff', borderRadius: 10, border: '1px solid #bfdbfe', color: '#2563eb', textDecoration: 'none', fontSize: 13, fontWeight: 500, marginBottom: 20 }}><Icone tipo="olho" cor="#2563eb" size={16} />Visualizar documento antes de auditar</a>
+            {reg?.url_arquivo ? <a href="#" onClick={(e) => visualizarDocumento(e, reg.url_arquivo!)} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: 14, backgroundColor: '#eff6ff', borderRadius: 10, border: '1px solid #bfdbfe', color: '#2563eb', textDecoration: 'none', fontSize: 13, fontWeight: 500, marginBottom: 20 }}><Icone tipo="olho" cor="#2563eb" size={16} />Visualizar documento antes de auditar</a>
               : <div style={{ padding: 14, backgroundColor: '#fef2f2', borderRadius: 10, border: '1px solid #fecaca', marginBottom: 20 }}><p style={{ fontSize: 13, color: '#b91c1c', margin: 0 }}>⚠️ Sem documento. Recomenda-se solicitar antes de auditar.</p></div>}
             <div style={{ marginBottom: 16 }}><label style={{ fontSize: 12, color: '#666', display: 'block', marginBottom: 8 }}>Decisão *</label>
               <div style={{ display: 'flex', gap: 12 }}>{[{ val: true, label: 'Aprovar', cor: '#16a34a', bg: '#f0fdf4' }, { val: false, label: 'Reprovar', cor: '#dc2626', bg: '#fef2f2' }].map(op => <button key={String(op.val)} onClick={() => setFormAud(f => ({ ...f, validado: op.val }))} style={{ flex: 1, height: 42, borderRadius: 8, fontSize: 13, fontWeight: 500, cursor: 'pointer', border: formAud.validado === op.val ? `2px solid ${op.cor}` : '1px solid #e0e0e0', backgroundColor: formAud.validado === op.val ? op.bg : 'white', color: formAud.validado === op.val ? op.cor : '#555' }}>{op.label}</button>)}</div>
@@ -575,7 +634,7 @@ function ModalExame({ dados, abaInicial, onClose, onUpdate, email, podeAuditar, 
                           </div>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                             {h.url_arquivo
-                              ? <a href={h.url_arquivo} target="_blank" rel="noreferrer" style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#2563eb', textDecoration: 'none', padding: '4px 10px', backgroundColor: '#eff6ff', borderRadius: 6, border: '1px solid #bfdbfe' }}>
+                              ? <a href="#" onClick={(e) => visualizarDocumento(e, h.url_arquivo!)} target="_blank" rel="noreferrer" style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#2563eb', textDecoration: 'none', padding: '4px 10px', backgroundColor: '#eff6ff', borderRadius: 6, border: '1px solid #bfdbfe' }}>
                                   <Icone tipo="olho" cor="#2563eb" size={13} /> Ver documento
                                 </a>
                               : <span style={{ fontSize: 12, color: '#aaa', display: 'flex', alignItems: 'center', gap: 4 }}><Icone tipo="clipe" cor="#ccc" size={13} /> Sem documento</span>}

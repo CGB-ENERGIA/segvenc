@@ -13,11 +13,11 @@ const SITUACOES_EXCLUIDAS_PADRAO = ['DEMITIDO', 'AF.PREVIDÊNCIA', 'LICENÇA MAT
 const TIPOS_SEM_VENCIMENTO = ['admissional', 'retorno', 'mudanca_risco', 'demissional']
 
 const TIPOS_ASO = [
-  { value: 'admissional',   label: 'Admissional',            sigla: 'ADM' },
-  { value: 'periodico',     label: 'Periódico',              sigla: 'PER' },
+  { value: 'admissional',   label: 'Admissional',             sigla: 'ADM' },
+  { value: 'periodico',     label: 'Periódico',               sigla: 'PER' },
   { value: 'retorno',       label: 'Retorno ao Trabalho',    sigla: 'RET' },
   { value: 'mudanca_risco', label: 'Mudança de Risco (MRO)', sigla: 'MRO' },
-  { value: 'demissional',   label: 'Demissional',            sigla: 'DEM' },
+  { value: 'demissional',   label: 'Demissional',             sigla: 'DEM' },
 ]
 
 const EXAMES_COMPL = [
@@ -51,13 +51,33 @@ type OrdemColuna = 'matricula' | 'nome' | 'base' | 'situacao' | 'admissao' | 'fu
 type OrdemDirecao = 'asc' | 'desc'
 type AbaModal = 'info' | 'documento' | 'programacao' | 'auditoria' | 'historico'
 
-// ─── HELPERS ──────────────────────────────────────────────────────────────────
+// ─── HELPERS GERAIS ───────────────────────────────────────────────────────────
 function formatarData(d: string | null | undefined): string { if (!d) return '—'; return new Date(d + 'T12:00:00').toLocaleDateString('pt-BR') }
 function calcularDias(dv: string | null): number | null { if (!dv) return null; return Math.ceil((new Date(dv + 'T12:00:00').getTime() - new Date().getTime()) / 86400000) }
 function getStatusASO(dv: string | null): StatusASO { const dias = calcularDias(dv); if (dias === null) return 'sem_aso'; if (dias < 0) return 'vencido'; if (dias <= 30) return 'atencao'; if (dias <= 60) return 'critico'; return 'no_prazo' }
 function getASOPorTipo(asos: ASO[], tipo: string): ASO | null { const lista = (asos || []).filter(a => a.tipo === tipo); if (!lista.length) return null; return lista.sort((a, b) => new Date(b.data_realizacao).getTime() - new Date(a.data_realizacao).getTime())[0] }
 function tipoLabel(tipo: string): string { return TIPOS_ASO.find(t => t.value === tipo)?.label ?? tipo }
 function tipoSigla(tipo: string): string { return TIPOS_ASO.find(t => t.value === tipo)?.sigla ?? tipo.toUpperCase().slice(0, 3) }
+
+// HELPER R2: Gera URL Assinada e abre o documento
+async function visualizarDocumento(e: React.MouseEvent, urlOuKey: string) {
+  e.preventDefault()
+  try {
+    let key = urlOuKey
+    // Tratamento de compatibilidade para os dados antigos que estão no banco
+    if (key.includes('supabase.co')) {
+      const parts = key.split('documentos/')
+      if (parts.length > 1) key = parts[1]
+    }
+    const res = await fetch(`/api/r2/signed-url?key=${encodeURIComponent(key)}`)
+    const data = await res.json()
+    if (data.url) window.open(data.url, '_blank')
+    else alert('Erro ao gerar link de visualização.')
+  } catch (err) {
+    console.error(err)
+    alert('Erro ao abrir o documento.')
+  }
+}
 
 function getASOPrincipal(col: Colaborador): { aso: ASO; vencimento: string } | null {
   const candidatos: { aso: ASO; vencimento: string; peso: number }[] = []
@@ -268,7 +288,38 @@ function ModalASO({ dados, abaInicial, onClose, onUpdate, email, podeAuditar, ni
     setLoadHistorico(false)
   }
 
-  async function fazerUpload() { if (!arquivo || !aso) return; setUploading(true); setErrUp(''); const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19); const ext = arquivo.name.split('.').pop(); const path = `asos/${colab.matricula}/${tipo}/${ts}.${ext}`; const { error: se } = await supabase.storage.from('documentos').upload(path, arquivo, { upsert: false }); if (se) { setErrUp(se.message); setUploading(false); return }; const { data: u } = supabase.storage.from('documentos').getPublicUrl(path); const { error: de } = await supabase.from('asos').update({ url_arquivo: u.publicUrl }).eq('id', aso.id); if (de) { setErrUp(de.message); setUploading(false); return }; setArquivo(null); setUploading(false); onUpdate(); onClose() }
+  // Upload modificado para usar as Rotas de API do Cloudflare R2
+  async function fazerUpload() {
+    if (!arquivo || !aso) return;
+    setUploading(true); setErrUp('');
+    const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    const ext = arquivo.name.split('.').pop();
+    const path = `asos/${colab.matricula}/${tipo}/${ts}.${ext}`;
+    
+    try {
+      const formData = new FormData();
+      formData.append('file', arquivo);
+      formData.append('key', path);
+      
+      const res = await fetch('/api/r2/upload', { method: 'POST', body: formData });
+      if (!res.ok) {
+        const errData = await res.json();
+        throw new Error(errData.error || 'Falha no upload para o R2');
+      }
+
+      // Agora gravamos a "key" limpa (caminho) em vez da URL completa no banco
+      const { error: de } = await supabase.from('asos').update({ url_arquivo: path }).eq('id', aso.id);
+      if (de) throw de;
+      
+      setArquivo(null);
+      onUpdate();
+      onClose();
+    } catch (e: any) {
+      setErrUp(e.message || 'Erro no envio');
+    } finally {
+      setUploading(false);
+    }
+  }
 
   async function salvarProg() { if (!aso || !formProg.data_programada) { setErrProg('Informe a data.'); return }; setSalvProg(true); setErrProg(''); const { data, error } = await supabase.from('programacoes_exames').insert({ aso_id: aso.id, matricula_colaborador: colab.matricula, data_programada: formProg.data_programada, observacao: formProg.observacao || null, criado_por: email }).select().single(); if (error) { setErrProg(error.message); setSalvProg(false); return }; setProgs(p => [{ ...data }, ...p]); setFormProg({ data_programada: '', observacao: '' }); setSalvProg(false); onUpdate() }
 
@@ -341,7 +392,7 @@ function ModalASO({ dados, abaInicial, onClose, onUpdate, email, podeAuditar, ni
 
           {/* ── DOCUMENTO ── */}
           {aba === 'documento' && <div>
-            {aso?.url_arquivo ? <div style={{ marginBottom: 24 }}><p style={{ fontSize: 13, fontWeight: 600, color: '#333', margin: '0 0 12px' }}>Documento atual</p><a href={aso.url_arquivo} target="_blank" rel="noreferrer" style={{ display: 'flex', alignItems: 'center', gap: 10, padding: 16, backgroundColor: '#eff6ff', borderRadius: 10, border: '1px solid #bfdbfe', color: '#2563eb', textDecoration: 'none', fontSize: 13, fontWeight: 500 }}><Icone tipo="olho" cor="#2563eb" size={18} />Visualizar documento</a></div>
+            {aso?.url_arquivo ? <div style={{ marginBottom: 24 }}><p style={{ fontSize: 13, fontWeight: 600, color: '#333', margin: '0 0 12px' }}>Documento atual</p><a href="#" onClick={(e) => visualizarDocumento(e, aso.url_arquivo!)} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: 16, backgroundColor: '#eff6ff', borderRadius: 10, border: '1px solid #bfdbfe', color: '#2563eb', textDecoration: 'none', fontSize: 13, fontWeight: 500 }}><Icone tipo="olho" cor="#2563eb" size={18} />Visualizar documento</a></div>
               : <div style={{ marginBottom: 24, padding: 16, backgroundColor: '#fffbeb', borderRadius: 10, border: '1px solid #fde68a' }}><p style={{ fontSize: 13, color: '#92400e', margin: 0 }}>⚠️ Nenhum documento anexado ainda.</p></div>}
             {!aso && <p style={{ fontSize: 13, color: '#aaa', marginBottom: 16 }}>Registre o ASO antes de anexar documento.</p>}
             {aso && <><p style={{ fontSize: 13, fontWeight: 600, color: '#333', margin: '0 0 12px' }}>{aso.url_arquivo ? 'Substituir documento' : 'Anexar documento'}</p>
@@ -376,7 +427,7 @@ function ModalASO({ dados, abaInicial, onClose, onUpdate, email, podeAuditar, ni
 
           {/* ── AUDITORIA ── */}
           {aba === 'auditoria' && podeAuditar && <div>
-            {aso?.url_arquivo ? <a href={aso.url_arquivo} target="_blank" rel="noreferrer" style={{ display: 'flex', alignItems: 'center', gap: 10, padding: 14, backgroundColor: '#eff6ff', borderRadius: 10, border: '1px solid #bfdbfe', color: '#2563eb', textDecoration: 'none', fontSize: 13, fontWeight: 500, marginBottom: 20 }}><Icone tipo="olho" cor="#2563eb" size={16} />Visualizar documento antes de auditar</a>
+            {aso?.url_arquivo ? <a href="#" onClick={(e) => visualizarDocumento(e, aso.url_arquivo!)} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: 14, backgroundColor: '#eff6ff', borderRadius: 10, border: '1px solid #bfdbfe', color: '#2563eb', textDecoration: 'none', fontSize: 13, fontWeight: 500, marginBottom: 20 }}><Icone tipo="olho" cor="#2563eb" size={16} />Visualizar documento antes de auditar</a>
               : <div style={{ padding: 14, backgroundColor: '#fef2f2', borderRadius: 10, border: '1px solid #fecaca', marginBottom: 20 }}><p style={{ fontSize: 13, color: '#b91c1c', margin: 0 }}>⚠️ Sem documento. Recomenda-se solicitar antes de auditar.</p></div>}
             <div style={{ marginBottom: 16 }}><label style={{ fontSize: 12, color: '#666', display: 'block', marginBottom: 8 }}>Decisão *</label>
               <div style={{ display: 'flex', gap: 12 }}>{[{ val: true, label: 'Aprovar', cor: '#16a34a', bg: '#f0fdf4' }, { val: false, label: 'Reprovar', cor: '#dc2626', bg: '#fef2f2' }].map(op => <button key={String(op.val)} onClick={() => setFormAud(f => ({ ...f, validado: op.val }))} style={{ flex: 1, height: 42, borderRadius: 8, fontSize: 13, fontWeight: 500, cursor: 'pointer', border: formAud.validado === op.val ? `2px solid ${op.cor}` : '1px solid #e0e0e0', backgroundColor: formAud.validado === op.val ? op.bg : 'white', color: formAud.validado === op.val ? op.cor : '#555' }}>{op.label}</button>)}</div>
@@ -411,7 +462,7 @@ function ModalASO({ dados, abaInicial, onClose, onUpdate, email, podeAuditar, ni
                           </div>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                             {h.url_arquivo
-                              ? <a href={h.url_arquivo} target="_blank" rel="noreferrer" style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#2563eb', textDecoration: 'none', padding: '4px 10px', backgroundColor: '#eff6ff', borderRadius: 6, border: '1px solid #bfdbfe' }}>
+                              ? <a href="#" onClick={(e) => visualizarDocumento(e, h.url_arquivo!)} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#2563eb', textDecoration: 'none', padding: '4px 10px', backgroundColor: '#eff6ff', borderRadius: 6, border: '1px solid #bfdbfe' }}>
                                   <Icone tipo="olho" cor="#2563eb" size={13} /> Ver documento
                                 </a>
                               : <span style={{ fontSize: 12, color: '#aaa', display: 'flex', alignItems: 'center', gap: 4 }}><Icone tipo="clipe" cor="#ccc" size={13} /> Sem documento</span>}
@@ -440,12 +491,28 @@ function ModalExameCompl({ colab, nomeExame, exame, onClose, onUpdate }: { colab
   const [arquivo, setArquivo] = useState<File | null>(null); const [salvando, setSalvando] = useState(false); const [erro, setErro] = useState('')
   const fileRef = useRef<HTMLInputElement>(null)
   const inp: React.CSSProperties = { width: '100%', height: 38, border: '1px solid #e0e0e0', borderRadius: 8, padding: '0 12px', fontSize: 13, boxSizing: 'border-box', outline: 'none', backgroundColor: 'white' }
+  
+  // Upload modificado para usar o Cloudflare R2
   async function salvar() {
     if (!dataRealizacao) { setErro('Data de realização é obrigatória.'); return }
     setSalvando(true); setErro('')
     try {
       let urlArquivo: string | null = exame?.url_arquivo || null
-      if (arquivo) { const ext = arquivo.name.split('.').pop(); const path = `exames_compl/${colab.matricula}/${nomeExame.replace(/\s/g, '_')}/${Date.now()}.${ext}`; const { error: uploadErr } = await supabase.storage.from('documentos').upload(path, arquivo); if (uploadErr) throw uploadErr; const { data: urlData } = supabase.storage.from('documentos').getPublicUrl(path); urlArquivo = urlData.publicUrl }
+      
+      if (arquivo) { 
+        const ext = arquivo.name.split('.').pop(); 
+        const path = `exames_compl/${colab.matricula}/${nomeExame.replace(/\s/g, '_')}/${Date.now()}.${ext}`; 
+        
+        const formData = new FormData();
+        formData.append('file', arquivo);
+        formData.append('key', path);
+        
+        const res = await fetch('/api/r2/upload', { method: 'POST', body: formData });
+        if (!res.ok) throw new Error('Falha no upload para o R2');
+        
+        urlArquivo = path;
+      }
+      
       const { data: tipo } = await supabase.from('tipos_exame_medico').select('id').eq('nome', nomeExame).single()
       if (!tipo) throw new Error('Tipo de exame não encontrado')
       if (exame) { await supabase.from('exames_aso').update({ data_realizacao: dataRealizacao, url_arquivo: urlArquivo }).eq('id', exame.id) }
@@ -454,6 +521,7 @@ function ModalExameCompl({ colab, nomeExame, exame, onClose, onUpdate }: { colab
     } catch (e: any) { setErro(e.message || 'Erro ao salvar') }
     setSalvando(false)
   }
+  
   return (
     <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 300 }}>
       <div style={{ backgroundColor: 'white', borderRadius: 16, padding: 28, width: '100%', maxWidth: 420, boxShadow: '0 20px 60px rgba(0,0,0,0.2)' }}>
@@ -465,7 +533,7 @@ function ModalExameCompl({ colab, nomeExame, exame, onClose, onUpdate }: { colab
           <div><label style={{ fontSize: 12, color: '#666', display: 'block', marginBottom: 4 }}>Data de realização *</label><input type="date" value={dataRealizacao} onChange={e => setDataRealizacao(e.target.value)} style={inp} /></div>
           <div>
             <label style={{ fontSize: 12, color: '#666', display: 'block', marginBottom: 4 }}>Documento <span style={{ color: '#aaa' }}>(opcional)</span></label>
-            {exame?.url_arquivo && <a href={exame.url_arquivo} target="_blank" rel="noreferrer" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', backgroundColor: '#eff6ff', borderRadius: 8, color: '#2563eb', textDecoration: 'none', fontSize: 12, marginBottom: 8 }}><Icone tipo="olho" cor="#2563eb" size={14} />Ver documento atual</a>}
+            {exame?.url_arquivo && <a href="#" onClick={(e) => visualizarDocumento(e, exame.url_arquivo!)} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', backgroundColor: '#eff6ff', borderRadius: 8, color: '#2563eb', textDecoration: 'none', fontSize: 12, marginBottom: 8 }}><Icone tipo="olho" cor="#2563eb" size={14} />Ver documento atual</a>}
             <div onClick={() => fileRef.current?.click()} style={{ border: '2px dashed #e0e0e0', borderRadius: 10, padding: '16px 20px', textAlign: 'center', cursor: 'pointer', backgroundColor: '#fafafa' }}>
               <Icone tipo="upload" cor="#aaa" size={20} /><p style={{ fontSize: 12, color: '#888', margin: '6px 0 0' }}>{arquivo ? arquivo.name : exame?.url_arquivo ? 'Substituir documento' : 'Clique para anexar'}</p>
               <input ref={fileRef} type="file" accept=".pdf,.jpg,.jpeg,.png" style={{ display: 'none' }} onChange={e => setArquivo(e.target.files?.[0] || null)} />
@@ -523,12 +591,27 @@ function ModalNovoASO({ colab, onClose, onSalvo }: { colab: Colaborador; onClose
   function adicionarExtra() { if (!exameExtra) return; const te = todosExames.find(t => t.id === parseInt(exameExtra)); if (!te || examesSugeridos.find(e => e.tipo_exame_id === te.id)) return; setExamesSugeridos(prev => [...prev, { tipo_exame_id: te.id, nome: te.nome, data: dataRealizacao || '', marcado: true, ultimaData: null }]); setExameExtra('') }
   function removerExtra(idx: number) { setExamesSugeridos(prev => prev.filter((_, i) => i !== idx)) }
 
+  // Upload modificado para usar o Cloudflare R2
   async function salvar() {
     if (!dataRealizacao) { setErro('Data de realização é obrigatória.'); return }
     setSalvando(true); setErro('')
     try {
       let urlArquivo: string | null = null
-      if (arquivo) { const ext = arquivo.name.split('.').pop(); const path = `asos/${colab.matricula}/${tipo}/${Date.now()}.${ext}`; const { error: uploadErr } = await supabase.storage.from('documentos').upload(path, arquivo); if (uploadErr) throw uploadErr; const { data: urlData } = supabase.storage.from('documentos').getPublicUrl(path); urlArquivo = urlData.publicUrl }
+      
+      if (arquivo) { 
+        const ext = arquivo.name.split('.').pop(); 
+        const path = `asos/${colab.matricula}/${tipo}/${Date.now()}.${ext}`; 
+        
+        const formData = new FormData();
+        formData.append('file', arquivo);
+        formData.append('key', path);
+        
+        const res = await fetch('/api/r2/upload', { method: 'POST', body: formData });
+        if (!res.ok) throw new Error('Falha no upload para o R2');
+        
+        urlArquivo = path;
+      }
+      
       const { data: novoASO, error: insertErr } = await supabase.from('asos').insert({ matricula_colaborador: colab.matricula, tipo, data_realizacao: dataRealizacao, data_vencimento: TIPOS_SEM_VENCIMENTO.includes(tipo) ? null : (dataVencimento || null), gse: colab.gse || null, observacao: observacao || null, url_arquivo: urlArquivo }).select().single()
       if (insertErr) throw insertErr
       const examesMarcados = examesSugeridos.filter(e => e.marcado && e.data)
