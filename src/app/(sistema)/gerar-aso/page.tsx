@@ -539,44 +539,52 @@ function ExameClinicoDocument({ form, empresa, medico }: { form: FormASO; empres
             <View style={{ flex: 1, borderBottom: '0.4pt solid #aaa' }}><Text> </Text></View>
           </View>
 
-          {/* ASSINATURAS */}
+       {/* ASSINATURAS */}
           <View style={{ border: '0.8pt solid #333', marginBottom: 4 }}>
-            <View style={{ flexDirection: 'row', borderBottom: '0.8pt solid #333' }}>
-              <View style={{ flex: 1, padding: '4 6', borderRight: '0.8pt solid #333', minHeight: 44 }}>
+            
+            {/* 1ª LINHA: Observações (Esq) | Info Médico (Dir) - MAIOR */}
+            <View style={{ flexDirection: 'row', borderBottom: '0.8pt solid #333', minHeight: 45 }}>
+              <View style={{ width: '50%', padding: '4 6', borderRight: '0.8pt solid #333' }}>
                 <Text style={{ fontFamily: 'Helvetica-Bold' }}>Observações:</Text>
               </View>
-              <View style={{ width: 150, padding: '4 6', alignItems: 'center' }}>
+              <View style={{ width: '50%', padding: '4 6', alignItems: 'center', justifyContent: 'center' }}>
                 <Text style={{ fontFamily: 'Helvetica-Bold', marginBottom: 3 }}>Médico Responsável pelo PCMSO</Text>
                 {[medico?.nome || '', medico?.especialidade || '', `CRM: ${medico?.crm || ''} . RQE N° ${medico?.rqe || ''}`, `FONE: ${medico?.telefone || ''}`].map((l, j) => (
                   <Text key={j} style={{ fontSize: 6.5, textAlign: 'center' }}>{l}</Text>
                 ))}
               </View>
             </View>
-            <View style={{ flexDirection: 'row', borderBottom: '0.8pt solid #333' }}>
-              <View style={{ flex: 1, padding: '4 6', borderRight: '0.8pt solid #333', minHeight: 18 }}>
-                <Text>Declaro verdade as informações prestadas acima</Text>
+
+            {/* 2ª LINHA: Declaração (Esq) | Médico Examinador (Dir) - MENOR */}
+            <View style={{ flexDirection: 'row', borderBottom: '0.8pt solid #333', minHeight: 20 }}>
+              <View style={{ width: '50%', padding: '4 6', borderRight: '0.8pt solid #333', justifyContent: 'center' }}>
+                <Text>Declaro ser verdade as informações prestadas acima.</Text>
               </View>
-              <View style={{ width: 150, padding: '4 6' }}>
-                <Text>Médico Examinador</Text>
+              <View style={{ width: '50%', padding: '4 6', justifyContent: 'center' }}>
+                <Text style={{ fontFamily: 'Helvetica-Bold' }}>Médico Examinador:</Text>
               </View>
             </View>
-            <View style={{ minHeight: 38 }} />
-          </View>
 
-          {/* ASSINATURA DO COLABORADOR */}
-          <View style={{ border: '0.8pt solid #333' }}>
-            <View style={{ flexDirection: 'row', minHeight: 32, alignItems: 'center' }}>
-              <View style={{ flex: 1, padding: '4 6', alignItems: 'center' }}>
+            {/* 3ª LINHA: Campos em Branco para Assinaturas - MAIOR */}
+            <View style={{ flexDirection: 'row', borderBottom: '0.8pt solid #333', minHeight: 45 }}>
+              <View style={{ width: '50%', borderRight: '0.8pt solid #333' }} />
+              <View style={{ width: '50%' }} />
+            </View>
+
+            {/* 4ª LINHA: Assinatura Colab (Esq) | Data (Dir) - MENOR */}
+            <View style={{ flexDirection: 'row', minHeight: 22 }}>
+              <View style={{ width: '50%', padding: '4 6', borderRight: '0.8pt solid #333', alignItems: 'center', justifyContent: 'center' }}>
                 <Text style={{ fontFamily: 'Helvetica-Bold', fontSize: 10 }}>Assinatura do colaborador</Text>
               </View>
-              <View style={{ width: 1, backgroundColor: '#333', height: 32 }} />
-              <View style={{ flex: 1, padding: '4 6', alignItems: 'center' }}>
+              {/* Mantive o mesmo padding da linha 2 para a palavra "Data:" ficar exatamente alinhada com "Médico Examinador:" */}
+              <View style={{ width: '50%', padding: '4 6', justifyContent: 'center' }}>
                 <Text style={{ fontFamily: 'Helvetica-Bold', fontSize: 10 }}>Data:</Text>
               </View>
             </View>
-          </View>
-          <Text style={{ fontSize: 6, color: '#aaa', marginTop: 3 }}>FORM 09/07</Text>
 
+          </View>
+          
+          <Text style={{ fontSize: 6, color: '#aaa', marginTop: 3 }}>FORM 09/07</Text>
         </View>
       </Page>
     </Document>
