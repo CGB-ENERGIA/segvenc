@@ -483,15 +483,14 @@ function ModalExame({ dados, abaInicial, onClose, onUpdate, email, podeAuditar, 
 
   const auds = [...(reg?.logs_auditoria || [])].sort((a, b) => new Date(b.data_auditoria).getTime() - new Date(a.data_auditoria).getTime())
 
-  const abas: { key: AbaModal; label: string }[] = [
-    { key: 'info', label: 'Informações' },
-    ...(nivel !== 'visualizador' ? [
-      { key: 'documento' as AbaModal, label: 'Documento' },
-      { key: 'programacao' as AbaModal, label: 'Programação' },
-    ] : []),
-    ...(podeAuditar ? [{ key: 'auditoria' as AbaModal, label: 'Auditoria' }] : []),
-    { key: 'historico' as AbaModal, label: 'Histórico' },
-  ]
+const abas: { key: AbaModal; label: string }[] = [
+  { key: 'info', label: 'Informações' },
+  ...(nivel !== 'visualizador' ? [
+    { key: 'documento' as AbaModal, label: 'Documento' },
+    { key: 'programacao' as AbaModal, label: 'Programação' },
+  ] : []),
+  { key: 'historico' as AbaModal, label: 'Histórico' },
+]
 
   const inp: React.CSSProperties = { width: '100%', height: 38, border: '1px solid #e0e0e0', borderRadius: 8, padding: '0 12px', fontSize: 13, boxSizing: 'border-box', outline: 'none' }
 

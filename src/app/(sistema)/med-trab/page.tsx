@@ -59,6 +59,7 @@ function getASOPorTipo(asos: ASO[], tipo: string): ASO | null { const lista = (a
 function tipoLabel(tipo: string): string { return TIPOS_ASO.find(t => t.value === tipo)?.label ?? tipo }
 function tipoSigla(tipo: string): string { return TIPOS_ASO.find(t => t.value === tipo)?.sigla ?? tipo.toUpperCase().slice(0, 3) }
 
+
 // HELPER R2: Gera URL Assinada e abre o documento
 async function visualizarDocumento(e: React.MouseEvent, urlOuKey: string) {
   e.preventDefault()
@@ -327,15 +328,14 @@ function ModalASO({ dados, abaInicial, onClose, onUpdate, email, podeAuditar, ni
 
   async function excluir() { if (!aso) return; if (confNome !== tLabel) { setErrExc('Nome não confere.'); return }; setExcluindo(true); const { error } = await supabase.from('asos').delete().eq('id', aso.id); if (error) { setErrExc(error.message); setExcluindo(false); return }; onUpdate(); onClose() }
 
-  const abas: { key: AbaModal; label: string }[] = [
-    { key: 'info', label: 'Informações' },
-    ...(nivel !== 'visualizador' ? [
-      { key: 'documento' as AbaModal, label: 'Documento' },
-      { key: 'programacao' as AbaModal, label: 'Programação' },
-    ] : []),
-    ...(podeAuditar ? [{ key: 'auditoria' as AbaModal, label: 'Auditoria' }] : []),
-    { key: 'historico' as AbaModal, label: 'Histórico' },
-  ]
+const abas: { key: AbaModal; label: string }[] = [
+  { key: 'info', label: 'Informações' },
+  ...(nivel !== 'visualizador' ? [
+    { key: 'documento' as AbaModal, label: 'Documento' },
+    { key: 'programacao' as AbaModal, label: 'Programação' },
+  ] : []),
+  { key: 'historico' as AbaModal, label: 'Histórico' },
+]
 
   const inp: React.CSSProperties = { width: '100%', height: 38, border: '1px solid #e0e0e0', borderRadius: 8, padding: '0 12px', fontSize: 13, boxSizing: 'border-box', outline: 'none' }
   const semVenc = TIPOS_SEM_VENCIMENTO.includes(tipo)

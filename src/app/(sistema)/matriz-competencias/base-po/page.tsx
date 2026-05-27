@@ -515,7 +515,6 @@ function ModalExame({ dados, abaInicial, onClose, onUpdate, email, podeAuditar, 
       { key: 'documento' as AbaModal, label: 'Documento' },
       { key: 'programacao' as AbaModal, label: 'Programação' },
     ] : []),
-    ...(podeAuditar ? [{ key: 'auditoria' as AbaModal, label: 'Auditoria' }] : []),
     { key: 'historico' as AbaModal, label: 'Histórico' },
   ]
 
