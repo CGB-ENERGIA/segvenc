@@ -41,7 +41,7 @@ type AbaModal = 'info' | 'documento' | 'programacao' | 'auditoria' | 'historico'
 function primeiroNome(s: string | null) { return s ? s.trim().split(' ')[0] : '—' }
 function formatarData(d: string | null) { return d ? new Date(d + 'T12:00:00').toLocaleDateString('pt-BR') : '—' }
 function getStatus(dv: string) {
-  const diff = (new Date(dv).getTime() - new Date().getTime()) / 86400000
+  const diff = (new Date(dv + 'T12:00:00').getTime() - new Date().getTime()) / 86400000
   return diff < 0 ? 'vencido' : diff <= 30 ? 'proximo' : 'valido'
 }
 function getDias(dv: string) { return Math.ceil((new Date(dv).getTime() - new Date().getTime()) / 86400000) }

@@ -612,7 +612,7 @@ export default function CNHPage() {
   const [filtroSits, setFiltroSits] = useState<string[]>([])
   const [situacoesDisp, setSituacoesDisp] = useState<string[]>([])
   const [filtroCategoria, setFiltroCategoria] = useState('')
-  const [filtroExigencia, setFiltroExigencia] = useState('')
+  const [filtroExigencia, setFiltroExigencia] = useState('SIM')
   const [cardAtivo, setCardAtivo] = useState<CardFiltro>(null)
   const [ordCol, setOrdCol] = useState<OrdemColuna>('nome')
   const [ordDir, setOrdDir] = useState<OrdemDirecao>('asc')
@@ -630,49 +630,86 @@ export default function CNHPage() {
     init()
   }, [])
 
-  async function buscarDados(sitsP: string[] | null) {
-    const primeiraVez = sitsP === null
-    setLoading(true)
+async function buscarDados(sitsP: string[] | null) {
+    const primeiraVez = sitsP === null
+    setLoading(true)
 
-    // Buscar CNHs atuais
-    const { data: cnhsData } = await supabase.from('cnhs').select('*').eq('is_atual', true)
-    const cnhMap: Record<string, CNH> = {}
-    ;(cnhsData || []).forEach((c: CNH) => { cnhMap[c.matricula_colaborador] = c })
+    try {
+// 1. Buscar TODAS as CNHs atuais do banco para montar o mapa (AGORA COM PAGINAÇÃO)
+      const cnhMap: Record<string, any> = {}
+      let fc = 0
+      
+      while (true) {
+        const { data: cnhsData, error } = await supabase.from('cnhs')
+          .select('*')
+          .eq('is_atual', true)
+          .range(fc, fc + 499)
 
-    // Buscar colaboradores com CNH
-    const mats = Object.keys(cnhMap)
-    if (!mats.length) { setColabs([]); setLoading(false); return }
+        if (error) throw error
+        if (!cnhsData || cnhsData.length === 0) break
 
-    let todos: any[] = []; let from = 0
-    const LOTE = 100
-    for (let i = 0; i < mats.length; i += LOTE) {
-      const lote = mats.slice(i, i + LOTE)
-      let q = supabase.from('colaboradores')
-        .select('matricula, nome, situacao, gerencia, supervisor, processo, bases(nome), funcoes(nome)')
-        .in('matricula', lote).order('nome').range(from, from + 499)
-      if (filtroBase) q = q.eq('base_id', filtroBase)
-      const { data: cd } = await q
-      if (cd) todos = [...todos, ...cd]
-    }
+        cnhsData.forEach((c: any) => { cnhMap[c.matricula_colaborador] = c })
+        
+        if (cnhsData.length < 500) break
+        fc += 500
+      }
 
-    if (primeiraVez) {
-      const sitsUnicas = [...new Set(todos.map((c: any) => c.situacao).filter(Boolean))].sort() as string[]
-      setSituacoesDisp(sitsUnicas)
-      const sitsIniciais = sitsUnicas.filter(s => !SITUACOES_EXCLUIDAS_PADRAO.includes(s))
-      setFiltroSits(sitsIniciais)
-      todos = todos.filter((c: any) => sitsIniciais.includes(c.situacao))
-    } else {
-      if (sitsP && sitsP.length > 0) todos = todos.filter((c: any) => sitsP.includes(c.situacao))
-    }
+      // 2. Buscar TODOS os colaboradores (com ou sem CNH) usando paginação performática
+      let todosColabs: any[] = []
+      let from = 0
+      const TAMANHO_PAGINA = 500
 
-    setColabs(todos.map((c: any) => ({
-      matricula: c.matricula, nome: c.nome, situacao: c.situacao,
-      base: c.bases?.nome || null, gerencia: c.gerencia || null,
-      supervisor: c.supervisor || null, funcao: c.funcoes?.nome || null,
-      processo: c.processo || null, cnh: cnhMap[c.matricula] || null,
-    })))
-    setLoading(false)
-  }
+      while (true) {
+        let q = supabase.from('colaboradores')
+          .select('matricula, nome, situacao, gerencia, supervisor, processo, bases(nome), funcoes(nome)')
+          .order('nome')
+          .range(from, from + TAMANHO_PAGINA - 1)
+
+        if (filtroBase) q = q.eq('base_id', filtroBase)
+
+        const { data: cd, error } = await q
+        if (error) throw error
+        if (!cd || cd.length === 0) break
+
+        todosColabs = [...todosColabs, ...cd]
+        if (cd.length < TAMANHO_PAGINA) break
+        from += TAMANHO_PAGINA
+      }
+
+      // 3. Tratar as situações (Filtro de Demitidos, Afastados, etc.)
+      if (primeiraVez) {
+        const sitsUnicas = [...new Set(todosColabs.map((c: any) => c.situacao).filter(Boolean))].sort() as string[]
+        setSituacoesDisp(sitsUnicas)
+        const sitsIniciais = sitsUnicas.filter(s => !SITUACOES_EXCLUIDAS_PADRAO.includes(s))
+        setFiltroSits(sitsIniciais)
+        todosColabs = todosColabs.filter((c: any) => sitsIniciais.includes(c.situacao))
+      } else {
+        if (sitsP && sitsP.length > 0) {
+          todosColabs = todosColabs.filter((c: any) => sitsP.includes(c.situacao))
+        } else {
+          todosColabs = [] // Nenhuma situação selecionada
+        }
+      }
+
+      // 4. Mapear o estado final fazendo o Left Join em memória
+      setColabs(todosColabs.map((c: any) => ({
+        matricula: c.matricula,
+        nome: c.nome,
+        situacao: c.situacao,
+        base: c.bases?.nome || null,
+        gerencia: c.gerencia || null,
+        supervisor: c.supervisor || null,
+        funcao: c.funcoes?.nome || null,
+        processo: c.processo || null,
+        cnh: cnhMap[c.matricula] || null, // Atribui null se o colaborador não tiver registro de CNH
+      })))
+
+    } catch (err) {
+      console.error('Erro ao buscar dados de CNH:', err)
+    } finally {
+      setLoading(false)
+    }
+  }
 
   useEffect(() => { if (situacoesDisp.length > 0) buscarDados(filtroSits) }, [filtroBase, filtroSits])
 
@@ -725,7 +762,7 @@ const filtrados = useMemo(() => statsFiltrados.filter(c => {
   const sitsIniciais = useMemo(() => situacoesDisp.filter(s => !SITUACOES_EXCLUIDAS_PADRAO.includes(s)), [situacoesDisp])
   const sitsAlteradas = JSON.stringify([...filtroSits].sort()) !== JSON.stringify([...sitsIniciais].sort())
   const temFiltro = !!(busca || filtroBase || filtroCategoria || filtroExigencia || cardAtivo || sitsAlteradas)
-  function limpar() { setBusca(''); setFiltroBase(''); setFiltroCategoria(''); setFiltroExigencia(''); setCardAtivo(null); setFiltroSits(sitsIniciais) }
+  function limpar() { setBusca(''); setFiltroBase(''); setFiltroCategoria(''); setFiltroExigencia('SIM'); setCardAtivo(null); setFiltroSits(sitsIniciais) }
 
   const sel: React.CSSProperties = { height: 36, border: '1px solid #e0e0e0', borderRadius: 8, padding: '0 10px', fontSize: 13, backgroundColor: 'white', color: '#555' }
   const tdBase = (ex?: React.CSSProperties): React.CSSProperties => ({ padding: '8px 14px', color: '#666', whiteSpace: 'nowrap', verticalAlign: 'middle', borderBottom: '1px solid #f5f5f5', borderRight: '1px solid #f0f0f0', ...ex })

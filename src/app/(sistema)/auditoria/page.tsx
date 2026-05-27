@@ -30,8 +30,6 @@ const TIPOS_ASO = [
 ]
 
 // ─── TIPOS ────────────────────────────────────────────────────────────────────
-// NOVO: tipo distingue upload de auditoria no histórico
-// Requer migration: ALTER TABLE logs_auditoria ADD COLUMN tipo TEXT DEFAULT 'auditoria';
 interface LogAuditoria {
   id: string; auditor_email: string; data_auditoria: string
   validado: boolean; observacao: string | null
@@ -71,7 +69,6 @@ function calcularDias(dv: string | null): number | null {
   return Math.ceil((new Date(dv + 'T12:00:00').getTime() - new Date().getTime()) / 86400000)
 }
 
-// ATUALIZADO: se o log mais recente for 'upload', status volta a pendente
 function getStatusAuditoria(logs: LogAuditoria[]): StatusAud {
   if (!logs || logs.length === 0) return 'pendente'
   const ultima = [...logs].sort((a, b) =>
@@ -94,12 +91,10 @@ function statusVencCores(dias: number | null): { bg: string; text: string } {
   return { bg: '#f0fdf4', text: '#15803d' }
 }
 
-// HELPER R2: Gera URL Assinada e abre o documento
 async function visualizarDocumento(e: React.MouseEvent, urlOuKey: string) {
   e.preventDefault()
   try {
     let key = urlOuKey
-    // Tratamento de compatibilidade para os dados antigos
     if (key.includes('supabase.co')) {
       const parts = key.split('documentos/')
       if (parts.length > 1) key = parts[1]
@@ -171,7 +166,6 @@ function FiltroSituacao({ opcoes, selecionadas, onChange }: { opcoes: string[]; 
   )
 }
 
-// ─── BOTÃO EXPORTAR ───────────────────────────────────────────────────────────
 function BotaoExportar({ onClick }: { onClick: (t: 'csv' | 'xlsx') => void }) {
   const [open, setOpen] = useState(false); const ref = useRef<HTMLDivElement>(null)
   useEffect(() => { const h = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false) }; document.addEventListener('mousedown', h); return () => document.removeEventListener('mousedown', h) }, [])
@@ -194,7 +188,6 @@ function BotaoExportar({ onClick }: { onClick: (t: 'csv' | 'xlsx') => void }) {
   )
 }
 
-// ─── TH ORDENÁVEL ─────────────────────────────────────────────────────────────
 function Th({ label, col, ord, dir, onClick, left, style }: {
   label: string; col: string; ord: string; dir: OrdemDirecao
   onClick: (c: string) => void; left?: number; style?: React.CSSProperties
@@ -250,8 +243,15 @@ function ModalAuditoria({
   async function salvar() {
     if (!form.validado && !form.observacao) { setErro('Informe o motivo da reprovação.'); return }
     setSalvando(true); setErro('')
-    await onSalvar(form.validado, form.observacao)
-    setSalvando(false)
+    
+    // Captura os erros gerados pelo Supabase e exibe na tela
+    try {
+      await onSalvar(form.validado, form.observacao)
+    } catch (err: any) {
+      setErro(err.message || 'Falha ao salvar no banco. Verifique as colunas da tabela logs_auditoria.')
+    } finally {
+      setSalvando(false)
+    }
   }
 
   async function handleUpload() {
@@ -261,8 +261,8 @@ function ModalAuditoria({
       await onNovoDocumento(arquivoSel)
       setArquivoSel(null)
       if (fileRef.current) fileRef.current.value = ''
-    } catch {
-      setErroUpload('Erro ao enviar o documento. Tente novamente.')
+    } catch (err: any) {
+      setErroUpload(err.message || 'Erro ao enviar o documento. Tente novamente.')
     } finally {
       setUploadando(false)
     }
@@ -307,8 +307,8 @@ function ModalAuditoria({
             </div>
           )}
 
-          {/* INSERIR NOVO DOCUMENTO */}
-          {podeAuditar && (
+          {/* INSERIR NOVO DOCUMENTO (Bloqueado se aprovado) */}
+          {podeAuditar && statusAtual !== 'aprovado' && (
             <div style={{ border: '1px solid #e0e0e0', borderRadius: 12, padding: '14px 16px', backgroundColor: '#fafafa' }}>
               <p style={{ fontSize: 13, fontWeight: 600, color: '#333', margin: '0 0 10px' }}>📎 Inserir novo documento</p>
               <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
@@ -374,7 +374,7 @@ function ModalAuditoria({
           {podeAuditar && statusAtual !== 'pendente' && (
             <p style={{ fontSize: 12, color: '#aaa', fontStyle: 'italic', margin: 0, textAlign: 'center' }}>
               {statusAtual === 'aprovado'
-                ? 'Documento aprovado. Envie um novo documento para reabrir a auditoria.'
+                ? 'Documento aprovado e bloqueado contra novas alterações.'
                 : 'Insira um novo documento acima para liberar a auditoria.'}
             </p>
           )}
@@ -506,7 +506,7 @@ export default function AuditoriaPage() {
       funcao: r.colaboradores?.funcoes?.nome || null,
       base: r.colaboradores?.bases?.nome || null,
       base_id: r.colaboradores?.bases?.id || null,
-      situacao: r.colaboradores?.situacao || '',
+      situacao: r.colaboradores?.situacao || 'ATIVO',
       nome_item: REGRAS_NR_PO.find(rg => rg.id === r.regra_id)?.nome || String(r.regra_id),
     }))
     setRegistrosNRPO(resultado)
@@ -538,6 +538,7 @@ export default function AuditoriaPage() {
     }
     const colabMap: Record<string, any> = {}
     colabs.forEach(c => { colabMap[c.matricula] = c })
+    
     let todos: RegistroASO[] = asos.map((a: any) => {
       const c = colabMap[a.matricula_colaborador] || {}
       return {
@@ -547,9 +548,11 @@ export default function AuditoriaPage() {
         logs_auditoria: a.logs_auditoria || [],
         nome_colaborador: c.nome || '—', funcao: c.funcoes?.nome || null,
         base: c.bases?.nome || null, base_id: c.bases?.id || null,
-        situacao: c.situacao || '',
+        // Fallback para ATIVO evita que o ASO suma caso a tabela colabs não sincronize a tempo
+        situacao: c.situacao || 'ATIVO',
       }
     })
+    
     if (primeiraVez) {
       const sitsUnicas = [...new Set(todos.map(r => r.situacao).filter(Boolean))].sort() as string[]
       setSitsDispASO(sitsUnicas)
@@ -568,25 +571,49 @@ export default function AuditoriaPage() {
   useEffect(() => { if (sitsDispASO.length > 0) buscarASO(filtroSitsASO) }, [filtroBaseASO, filtroSitsASO])
 
   // ─── SALVAR AUDITORIA ─────────────────────────────────────────────────────
-  async function salvarAuditoriaASO(aso: RegistroASO, validado: boolean, obs: string) {
-    await supabase.from('logs_auditoria').insert({
-      aso_id: aso.id, auditor_email: usuario?.email || '',
-      validado, observacao: obs || null,
+async function salvarAuditoriaASO(aso: RegistroASO, validado: boolean, obs: string) {
+    // Garantimos o e-mail aqui
+    const emailFinal = usuario?.email && usuario.email.trim() !== "" ? usuario.email : "sistema@cgb.com";
+
+    const { error } = await supabase.from('logs_auditoria').insert({
+      aso_id: aso.id, 
+      auditor_email: emailFinal,
+      validado, 
+      observacao: obs || null,
       tipo: 'auditoria',
       data_auditoria: new Date().toISOString(),
     })
+    
+    if (error) {
+      console.error("ERRO DETALHADO:", error);
+      alert("Erro ao gravar log: " + error.message);
+      return;
+    }
+    
     const novos = await buscarASO(filtroSitsASO)
     const atualizado = novos.find(r => r.id === aso.id)
     if (atualizado) setModalASO(atualizado); else setModalASO(null)
   }
 
-  async function salvarAuditoriaNRPO(reg: RegistroNRPO, validado: boolean, obs: string) {
-    await supabase.from('logs_auditoria').insert({
-      registro_id: reg.id, auditor_email: usuario?.email || '',
-      validado, observacao: obs || null,
+async function salvarAuditoriaNRPO(reg: RegistroNRPO, validado: boolean, obs: string) {
+    // Garantimos o e-mail aqui
+    const emailFinal = usuario?.email && usuario.email.trim() !== "" ? usuario.email : "sistema@cgb.com";
+
+    const { error } = await supabase.from('logs_auditoria').insert({
+      registro_id: reg.id, 
+      auditor_email: emailFinal,
+      validado, 
+      observacao: obs || null,
       tipo: 'auditoria',
       data_auditoria: new Date().toISOString(),
     })
+    
+    if (error) {
+      console.error("ERRO DETALHADO:", error);
+      alert("Erro ao gravar log: " + error.message);
+      return;
+    }
+
     const novos = await buscarNRPO(filtroSitsNRPO)
     const atualizado = novos.find(r => r.id === reg.id)
     if (atualizado) setModalNRPO(atualizado); else setModalNRPO(null)
@@ -604,11 +631,9 @@ export default function AuditoriaPage() {
     const res = await fetch('/api/r2/upload', { method: 'POST', body: formData })
     if (!res.ok) throw new Error('Falha no upload do documento')
 
-    // Atualiza arquivo no registro gravando o PATH (chave) no R2
     await supabase.from('asos').update({ url_arquivo: path }).eq('id', aso.id)
 
-    // Gera log de upload → status volta a pendente
-    await supabase.from('logs_auditoria').insert({
+    const { error } = await supabase.from('logs_auditoria').insert({
       aso_id: aso.id,
       auditor_email: usuario?.email || '',
       validado: false,
@@ -616,6 +641,7 @@ export default function AuditoriaPage() {
       observacao: file.name,
       data_auditoria: new Date().toISOString(),
     })
+    if (error) throw error
 
     const novos = await buscarASO(filtroSitsASO)
     const atualizado = novos.find(r => r.id === aso.id)
@@ -633,11 +659,9 @@ export default function AuditoriaPage() {
     const res = await fetch('/api/r2/upload', { method: 'POST', body: formData })
     if (!res.ok) throw new Error('Falha no upload do documento')
 
-    // Atualiza arquivo no registro gravando o PATH (chave) no R2
     await supabase.from('registros_exames').update({ url_arquivo: path }).eq('id', reg.id)
 
-    // Gera log de upload → status volta a pendente
-    await supabase.from('logs_auditoria').insert({
+    const { error } = await supabase.from('logs_auditoria').insert({
       registro_id: reg.id,
       auditor_email: usuario?.email || '',
       validado: false,
@@ -645,6 +669,7 @@ export default function AuditoriaPage() {
       observacao: file.name,
       data_auditoria: new Date().toISOString(),
     })
+    if (error) throw error
 
     const novos = await buscarNRPO(filtroSitsNRPO)
     const atualizado = novos.find(r => r.id === reg.id)
