@@ -113,7 +113,7 @@ function gerarExport(colabs: Colaborador[], treinamentos: Treinamento[]) {
     const l: Record<string, string> = {
       'Matrícula': c.matricula, 'Nome': c.nome, 'Função': c.funcoes?.nome || '',
       'Processo': c.processo || '', 'Base': c.bases?.nome || '',
-      'Situação': c.situacao, 'Gerência': c.gerencia || '', 'Supervisor': c.supervisor || ''
+      'Situação': c.situacao, 'Gerência': c.gerencia || '', 'Coordenador': c.supervisor || ''
     }
     treinamentos.forEach(t => {
       const obrig = getObrig(c, t.nome)
@@ -888,7 +888,7 @@ export default function BasePOPage() {
   const colsDef = [
     { key: 'matricula', label: 'Matrícula' }, { key: 'nome', label: 'Nome' }, { key: 'funcao', label: 'Função' },
     { key: 'processo', label: 'Processo' }, { key: 'base', label: 'Base' }, { key: 'situacao', label: 'Situação' },
-    { key: 'gerencia', label: 'Gerência' }, { key: 'supervisor', label: 'Supervisor' },
+    { key: 'gerencia', label: 'Gerência' }, { key: 'supervisor', label: 'Coordenador' },
     ...treinamentos.map(t => ({ key: `exame_${t.id}`, label: t.nome }))
   ]
   const padCell = compacto ? '4px 10px' : '8px 16px'; const fs = compacto ? 12 : 13
@@ -938,7 +938,7 @@ export default function BasePOPage() {
       </select>
       <FiltroSituacao opcoes={situacoesDisp} selecionadas={filtroSits} onChange={setFiltroSits} />
       <select value={filtroSup} onChange={e => setFiltroSup(e.target.value)} style={{ ...sel, width: 160 }}>
-        <option value="">Todos os supervisores</option>{supervisoresDisp.map(s => <option key={s} value={s}>{primeiroNome(s)}</option>)}
+        <option value="">Todos os Coordenadores</option>{supervisoresDisp.map(s => <option key={s} value={s}>{primeiroNome(s)}</option>)}
       </select>
       {podeEditar && (
         <button onClick={() => setModalGerenciar(true)} style={{ height: 36, padding: '0 12px', fontSize: 12, border: '1px solid #e0e0e0', borderRadius: 8, backgroundColor: 'white', color: '#555', cursor: 'pointer' }}>👥 Gerenciar</button>
@@ -967,7 +967,7 @@ export default function BasePOPage() {
               {vis('base')       && <Th label="Base"       col="base"       ord={ordCol} dir={ordDir} onClick={toggleOrd} />}
               {vis('situacao')   && <Th label="Situação"   col="situacao"   ord={ordCol} dir={ordDir} onClick={toggleOrd} />}
               {vis('gerencia')   && <Th label="Gerência"   col="gerencia"   ord={ordCol} dir={ordDir} onClick={toggleOrd} />}
-              {vis('supervisor') && <Th label="Supervisor" col="supervisor" ord={ordCol} dir={ordDir} onClick={toggleOrd} />}
+              {vis('supervisor') && <Th label="Coordenador" col="supervisor" ord={ordCol} dir={ordDir} onClick={toggleOrd} />}
               {treinamentos.filter(t => vis(`exame_${t.id}`)).map(t => <Th key={t.id} label={t.nome} col={`exame_${t.id}` as OrdemColuna} ord={ordCol} dir={ordDir} onClick={toggleOrd} style={{ textAlign: 'center' }} />)}
             </tr>
           </thead>

@@ -105,7 +105,7 @@ function gerarExport(colabs: Colaborador[], nrs: NR[], matriz: MatrizTreinamento
       'Matrícula': c.matricula, 'Nome': c.nome, 'Função': c.funcoes?.nome || '',
       'Processo': c.processo || '', 'Base': c.bases?.nome || '',
       'Admissão': formatarData(c.data_admissao), 'Situação': c.situacao,
-      'Gerência': c.gerencia || '', 'Supervisor': c.supervisor || ''
+      'Gerência': c.gerencia || '', 'Coordenador': c.supervisor || ''
     }
     nrs.forEach(nr => {
       const obrig = getObrigatoriedade(matriz, c.funcoes?.nome || null, c.processo, nr.nome)
@@ -830,7 +830,7 @@ export default function BaseNRPage() {
   const colsDef = [
     { key: 'matricula', label: 'Matrícula' }, { key: 'nome', label: 'Nome' }, { key: 'funcao', label: 'Função' },
     { key: 'processo', label: 'Processo' }, { key: 'base', label: 'Base' }, { key: 'admissao', label: 'Admissão' },
-    { key: 'situacao', label: 'Situação' }, { key: 'gerencia', label: 'Gerência' }, { key: 'supervisor', label: 'Supervisor' },
+    { key: 'situacao', label: 'Situação' }, { key: 'gerencia', label: 'Gerência' }, { key: 'supervisor', label: 'Coordenador' },
     ...nrs.map(n => ({ key: `nr_${n.id}`, label: n.nome }))
   ]
   const padCell = compacto ? '4px 10px' : '8px 16px'; const fs = compacto ? 12 : 13
@@ -878,7 +878,7 @@ export default function BaseNRPage() {
         <option value="">Todas as gerências</option>{gerenciasDisp.map(g => <option key={g} value={g}>{g}</option>)}
       </select>
       <select value={filtroSup} onChange={e => setFiltroSup(e.target.value)} style={{ ...sel, width: 160 }}>
-        <option value="">Todos os supervisores</option>{supervisoresDisp.map(s => <option key={s} value={s}>{primeiroNome(s)}</option>)}
+        <option value="">Todos os coordenadores</option>{supervisoresDisp.map(s => <option key={s} value={s}>{primeiroNome(s)}</option>)}
       </select>
       <div style={{ flex: 1 }} />
       {temFiltro && <button onClick={limpar} style={{ height: 36, padding: '0 12px', fontSize: 12, border: '1px solid #fca5a5', borderRadius: 8, backgroundColor: '#fef2f2', color: '#dc2626', cursor: 'pointer' }}>✕ Limpar</button>}
@@ -901,7 +901,7 @@ export default function BaseNRPage() {
               {vis('admissao') && <Th label="Admissão" col="admissao" ord={ordCol} dir={ordDir} onClick={toggleOrd} />}
               {vis('situacao') && <Th label="Situação" col="situacao" ord={ordCol} dir={ordDir} onClick={toggleOrd} />}
               {vis('gerencia') && <Th label="Gerência" col="gerencia" ord={ordCol} dir={ordDir} onClick={toggleOrd} />}
-              {vis('supervisor') && <Th label="Supervisor" col="supervisor" ord={ordCol} dir={ordDir} onClick={toggleOrd} />}
+              {vis('supervisor') && <Th label="Coordenador" col="supervisor" ord={ordCol} dir={ordDir} onClick={toggleOrd} />}
               {nrs.filter(n => vis(`nr_${n.id}`)).map(n => <Th key={n.id} label={n.nome} col={`nr_${n.id}` as OrdemColuna} ord={ordCol} dir={ordDir} onClick={toggleOrd} style={{ textAlign: 'center' }} />)}
             </tr>
           </thead>

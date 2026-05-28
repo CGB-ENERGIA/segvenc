@@ -20,7 +20,7 @@ const COLUNAS_DEF = [
   { key: 'gse',            label: 'GSE' },
   { key: 'base',           label: 'Base' },
   { key: 'gerencia',       label: 'Gerência' },
-  { key: 'supervisor',     label: 'Supervisor' },
+  { key: 'supervisor',     label: 'Coordenador' },
   { key: 'admissao',       label: 'Admissão' },
   { key: 'situacao',       label: 'Situação' },
   { key: 'sexo',           label: 'Sexo' },
@@ -58,7 +58,7 @@ interface DiffImport {
   cnh?: { numero: string | null; categoria: string | null; vencimento: string | null }
 }
 
-type OrdemColuna = 'nome' | 'matricula' | 'funcao' | 'processo' | 'base' | 'gerencia' | 'supervisor' | 'admissao' | 'demissao' | 'situacao'
+type OrdemColuna = 'nome' | 'matricula' | 'funcao' | 'processo' | 'base' | 'gerencia' | 'supervisor' | 'gse' | 'admissao' | 'demissao' | 'situacao'
 type OrdemDirecao = 'asc' | 'desc'
 type FiltroCard = 'ATIVO' | 'AF.PREVIDÊNCIA' | 'FÉRIAS' | 'AVISO PRÉVIO' | 'LICENÇA MATERNIDADE' | 'DEMITIDO' | null
 
@@ -242,13 +242,20 @@ export default function ColaboradoresPage() {
     else setForm(f => ({ ...f, gse: '' }))
   }
 
-  async function buscar(base: string, funcao: string, situacao: string, pag: number = 1, busca: string = '') {
-    setCarregando(true)
-    const from = (pag - 1) * POR_PAGINA; const to = from + POR_PAGINA - 1
-    let q = supabase.from('colaboradores').select(
-      'matricula, nome, funcao_id, gse, base_id, gerencia_id, contato, processo, data_admissao, data_demissao, email_corporativo, situacao, gerencia, supervisor, sexo, data_nascimento, estado_civil, cpf, rg, rg_orgao, rg_uf, bases(nome), funcoes(nome)',
-      { count: 'exact' }
-    ).order('nome').range(from, to)
+const COLUNA_DB: Partial<Record<OrdemColuna, string>> = {
+  nome: 'nome', matricula: 'matricula', processo: 'processo',
+  gerencia: 'gerencia', supervisor: 'supervisor', gse: 'gse',
+  admissao: 'data_admissao', demissao: 'data_demissao', situacao: 'situacao',
+}
+
+async function buscar(base: string, funcao: string, situacao: string, pag: number = 1, busca: string = '', ordem: OrdemColuna = 'nome', direcao: OrdemDirecao = 'asc') {
+  setCarregando(true)
+  const from = (pag - 1) * POR_PAGINA; const to = from + POR_PAGINA - 1
+  const colDB = COLUNA_DB[ordem] || 'nome'
+  let q = supabase.from('colaboradores').select(
+    'matricula, nome, funcao_id, gse, base_id, gerencia_id, contato, processo, data_admissao, data_demissao, email_corporativo, situacao, gerencia, supervisor, sexo, data_nascimento, estado_civil, cpf, rg, rg_orgao, rg_uf, bases(nome), funcoes(nome)',
+    { count: 'exact' }
+  ).order(colDB, { ascending: direcao === 'asc' }).range(from, to)
     if (situacao) q = q.eq('situacao', situacao)
     if (base) q = q.eq('base_id', parseInt(base))
     if (funcao) q = q.eq('funcao_id', parseInt(funcao))
@@ -272,7 +279,7 @@ export default function ColaboradoresPage() {
     init()
   }, [])
 
-  useEffect(() => { setPagina(1); buscar(filtroBase, filtroFuncao, filtroSituacao, 1, filtroBusca) }, [filtroBase, filtroFuncao, filtroSituacao, filtroBusca])
+  useEffect(() => { setPagina(1); buscar(filtroBase, filtroFuncao, filtroSituacao, 1, filtroBusca, ordemColuna, ordemDirecao) }, [filtroBase, filtroFuncao, filtroSituacao, filtroBusca])
 
   // ─── CRUD ──────────────────────────────────────────────────────────────────
   function handleCard(status: FiltroCard) {
@@ -280,10 +287,15 @@ export default function ColaboradoresPage() {
     else { setFiltroCard(status); setFiltroSituacao(status || '') }
     setPagina(1)
   }
-  function toggleOrdem(coluna: OrdemColuna) {
-    if (ordemColuna === coluna) setOrdemDirecao(d => d === 'asc' ? 'desc' : 'asc')
-    else { setOrdemColuna(coluna); setOrdemDirecao('asc') }
-  }
+function toggleOrdem(coluna: OrdemColuna) {
+  const novaDirecao = ordemColuna === coluna && ordemDirecao === 'asc' ? 'desc' : 'asc'
+  const novaOrdem = coluna
+  setOrdemColuna(novaOrdem)
+  setOrdemDirecao(novaDirecao)
+  setPagina(1)
+  buscar(filtroBase, filtroFuncao, filtroSituacao, 1, filtroBusca, novaOrdem, novaDirecao)
+}
+
   function limparFiltros() { setFiltroBusca(''); setFiltroBase(''); setFiltroFuncao(''); setFiltroSituacao('ATIVO'); setFiltroCard(null); setPagina(1) }
 
   const ordenados = [...colaboradores].sort((a, b) => {
@@ -361,7 +373,7 @@ export default function ColaboradoresPage() {
     const linhas = todos.map((c: any) => ({
       'Matrícula': c.matricula, 'Nome': c.nome, 'Função': c.funcoes?.nome || '',
       'Base': c.bases?.nome || '', 'GSE': c.gse || '', 'Gerência': c.gerencia || '',
-      'Supervisor': c.supervisor || '', 'Processo': c.processo || '', 'Sexo': c.sexo || '',
+      'Coordenador': c.supervisor || '', 'Processo': c.processo || '', 'Sexo': c.sexo || '',
       'Estado Civil': c.estado_civil || '', 'Dt. Nascimento': fmtData(c.data_nascimento),
       'CPF': c.cpf || '', 'RG': c.rg || '', 'Órgão RG': c.rg_orgao || '', 'UF RG': c.rg_uf || '',
       'Admissão': fmtData(c.data_admissao), 'Demissão': fmtData(c.data_demissao),
@@ -524,7 +536,7 @@ export default function ColaboradoresPage() {
 
       logs.push(`${diffs.filter(d => d.tipo === 'novo').length} novos colaboradores`)
       logs.push(`${diffs.filter(d => d.tipo === 'atualizacao').length} atualizações reais encontradas`)
-      logs.push(`🛡️ GSE, Processo, Gerência e Supervisor mantidos intactos conforme o banco.`)
+      logs.push(`🛡️ GSE, Processo, Gerência e Coordenador mantidos intactos conforme o banco.`)
 
       setImportDiffs(diffs); setImportLog(logs); setImportStep(2)
     } catch (e: any) {
@@ -628,10 +640,10 @@ export default function ColaboradoresPage() {
                   {vis('matricula')       && <ThOrdenavel label="Matrícula"      coluna="matricula" ordemAtual={ordemColuna} direcao={ordemDirecao} onClick={toggleOrdem} />}
                   {vis('funcao')          && <ThOrdenavel label="Função"         coluna="funcao"    ordemAtual={ordemColuna} direcao={ordemDirecao} onClick={toggleOrdem} />}
                   {vis('processo')        && <ThOrdenavel label="Processo"       coluna="processo"  ordemAtual={ordemColuna} direcao={ordemDirecao} onClick={toggleOrdem} />}
-                  {vis('gse')             && <ThSimples   label="GSE" style={{ textAlign: 'center' }} />}
+                  {vis('gse')             && <ThOrdenavel label="GSE"            coluna="gse"       ordemAtual={ordemColuna} direcao={ordemDirecao} onClick={toggleOrdem} style={{ textAlign: 'center' }} />}
                   {vis('base')            && <ThOrdenavel label="Base"           coluna="base"      ordemAtual={ordemColuna} direcao={ordemDirecao} onClick={toggleOrdem} />}
                   {vis('gerencia')        && <ThOrdenavel label="Gerência"       coluna="gerencia"  ordemAtual={ordemColuna} direcao={ordemDirecao} onClick={toggleOrdem} />}
-                  {vis('supervisor')      && <ThOrdenavel label="Supervisor"     coluna="supervisor"ordemAtual={ordemColuna} direcao={ordemDirecao} onClick={toggleOrdem} />}
+                  {vis('supervisor')      && <ThOrdenavel label="Coordenador"     coluna="supervisor"ordemAtual={ordemColuna} direcao={ordemDirecao} onClick={toggleOrdem} />}
                   {vis('admissao')        && <ThOrdenavel label="Admissão"       coluna="admissao"  ordemAtual={ordemColuna} direcao={ordemDirecao} onClick={toggleOrdem} />}
                   {vis('situacao')        && <ThOrdenavel label="Situação"       coluna="situacao"  ordemAtual={ordemColuna} direcao={ordemDirecao} onClick={toggleOrdem} />}
                   {vis('sexo')            && <ThSimples   label="Sexo" />}
@@ -724,7 +736,7 @@ export default function ColaboradoresPage() {
                 <div style={{ marginTop: 16, padding: 12, backgroundColor: '#fffbeb', borderRadius: 8, border: '1px solid #fde68a', fontSize: 12, color: '#78350f' }}>
                   <p style={{ fontWeight: 600, margin: '0 0 6px' }}>📋 Colunas reconhecidas do TOTVS:</p>
                   <p style={{ margin: '0 0 4px', lineHeight: 1.8 }}>CHAPA · NOME · FUNÇÃO · SEXO · ESTADO_CIVIL · SITUAÇÃO · SEÇÃO · DTNASC · CPF · CARTIDENTIDADE · UFCARTIDENT · ADMISSÃO · DEMISSÃO · CARTMOTORISTA · TIPOCARTHABILIT · DTVENCHABILIT · RATEIO_FUNCIONARIO</p>
-                  <p style={{ margin: 0, color: '#92400e' }}>⚡ <strong>RATEIO_FUNCIONARIO</strong> atualiza automaticamente Processo, Gerência e Supervisor via tabela de Centro de Custo.</p>
+                  <p style={{ margin: 0, color: '#92400e' }}>⚡ <strong>RATEIO_FUNCIONARIO</strong> atualiza automaticamente Processo, Gerência e Coordenador via tabela de Centro de Custo.</p>
                 </div>
               </div>
             )}
@@ -858,7 +870,7 @@ export default function ColaboradoresPage() {
                 )}
               </div>
               <div style={{ gridColumn: '1 / -1' }}><label style={labelStyle}>Gerência</label><select value={form.gerencia} onChange={e => setForm({ ...form, gerencia: e.target.value })} style={inputStyle}><option value="">Selecione...</option>{gerencias.map(g => <option key={g.sigla} value={g.sigla}>{g.sigla} — {g.nome}</option>)}</select></div>
-              <div style={{ gridColumn: '1 / -1' }}><label style={labelStyle}>Supervisor</label><select value={form.supervisor} onChange={e => setForm({ ...form, supervisor: e.target.value })} style={inputStyle}><option value="">Selecione...</option>{supervisores.map(s => <option key={s.id} value={s.nome}>{s.nome}</option>)}</select></div>
+              <div style={{ gridColumn: '1 / -1' }}><label style={labelStyle}>Coordenador</label><select value={form.supervisor} onChange={e => setForm({ ...form, supervisor: e.target.value })} style={inputStyle}><option value="">Selecione...</option>{supervisores.map(s => <option key={s.id} value={s.nome}>{s.nome}</option>)}</select></div>
               <div><label style={labelStyle}>Data de Admissão</label><input type="date" value={form.data_admissao} onChange={e => setForm({ ...form, data_admissao: e.target.value })} style={inputStyle} /></div>
               <div><label style={labelStyle}>Data de Demissão</label><input type="date" value={form.data_demissao} onChange={e => setForm({ ...form, data_demissao: e.target.value })} style={inputStyle} /></div>
             </div>

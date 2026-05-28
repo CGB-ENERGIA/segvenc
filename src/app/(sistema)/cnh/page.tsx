@@ -110,7 +110,7 @@ function gerarExport(colabs: ColabCNH[]) {
     'Base': c.base || '',
     'Situação': c.situacao,
     'Gerência': c.gerencia || '',
-    'Supervisor': c.supervisor || '',
+    'Coordenador': c.supervisor || '',
     'Função': c.funcao || '',
     'Nº CNH': c.cnh?.numero_cnh || '',
     'Categoria': c.cnh?.categoria || '',
@@ -841,7 +841,7 @@ const filtrados = useMemo(() => statsFiltrados.filter(c => {
                 <Th label="Base" col="base" ord={ordCol} dir={ordDir} onClick={toggleOrd} />
                 <Th label="Situação" col="situacao" ord={ordCol} dir={ordDir} onClick={toggleOrd} />
                 <Th label="Gerência" col="gerencia" ord={ordCol} dir={ordDir} onClick={toggleOrd} />
-                <Th label="Supervisor" col="supervisor" ord={ordCol} dir={ordDir} onClick={toggleOrd} />
+                <Th label="Coordenador" col="supervisor" ord={ordCol} dir={ordDir} onClick={toggleOrd} />
                 <Th label="Função" col="funcao" ord={ordCol} dir={ordDir} onClick={toggleOrd} />
                 <Th label="Nº CNH" col="categoria" ord={ordCol} dir={ordDir} onClick={toggleOrd} />
                 <Th label="Categoria" col="categoria" ord={ordCol} dir={ordDir} onClick={toggleOrd} style={{ textAlign: 'center' }} />

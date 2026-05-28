@@ -336,7 +336,7 @@ function FiltrosGlobais({ bases, gerencias, supervisores, situacoes, filtroBase,
       <span style={{ fontSize: 12, fontWeight: 600, color: COR_TEXTO_SECUNDARIO, marginRight: 4 }}>Filtros:</span>
       <select value={filtroBase} onChange={e => onBase(e.target.value)} style={sel}><option value="">Todas as bases</option>{bases.map(b => <option key={b} value={b}>{b}</option>)}</select>
       <select value={filtroGer} onChange={e => onGer(e.target.value)} style={sel}><option value="">Todas as gerências</option>{gerencias.map(g => <option key={g} value={g}>{g}</option>)}</select>
-      <select value={filtroSup} onChange={e => onSup(e.target.value)} style={sel}><option value="">Todos os supervisores</option>{supervisores.map(s => <option key={s} value={s}>{s.split(' ')[0]}</option>)}</select>
+      <select value={filtroSup} onChange={e => onSup(e.target.value)} style={sel}><option value="">Todos os coordenadores</option>{supervisores.map(s => <option key={s} value={s}>{s.split(' ')[0]}</option>)}</select>
       <FiltroSituacao opcoes={situacoes} selecionadas={filtroSits} onChange={onSits} />
       {abaModulo === 'nr' && (
         <FiltroSituacao
@@ -553,7 +553,7 @@ function TabelaNR({ colabs, nrs, matriz, situacao, filtroAtivo }: { colabs: Cola
   }, [colabs, nrs, matriz, situacao, filtroAtivo, ordCol, ordDir])
 
   const cor = corSituacaoNR(situacao)
-  const dados = linhas.map(r => ({ 'Matrícula': r.matricula, 'Nome': r.nome, 'Base': r.base || '', 'Gerência': r.gerencia || '', 'Supervisor': r.supervisor || '', 'Função': r.funcao || '', 'Treinamento': r.treinamento, 'Vencimento': formatarData(r.vencimento), 'Dias': r.dias ?? '' }))
+  const dados = linhas.map(r => ({ 'Matrícula': r.matricula, 'Nome': r.nome, 'Base': r.base || '', 'Gerência': r.gerencia || '', 'Coordenador': r.supervisor || '', 'Função': r.funcao || '', 'Treinamento': r.treinamento, 'Vencimento': formatarData(r.vencimento), 'Dias': r.dias ?? '' }))
 
   return (
     <div style={{ backgroundColor: COR_CARD, borderRadius: 16, border: `1px solid ${COR_BORDA}`, overflow: 'hidden' }}>
@@ -568,7 +568,7 @@ function TabelaNR({ colabs, nrs, matriz, situacao, filtroAtivo }: { colabs: Cola
               {[
                 { label: 'Matrícula', col: 'matricula' }, { label: 'Nome', col: 'nome' },
                 { label: 'Base', col: 'base' }, { label: 'Gerência', col: 'gerencia' },
-                { label: 'Supervisor', col: 'supervisor' }, { label: 'Função', col: 'funcao' },
+                { label: 'Coordenador', col: 'supervisor' }, { label: 'Função', col: 'funcao' },
                 { label: 'Treinamento', col: 'treinamento' }, { label: 'Vencimento', col: 'vencimento' },
                 { label: 'Dias', col: 'dias' },
               ].map(({ label, col }) => {
@@ -628,7 +628,7 @@ function TabelaPO({ colabs, pos, situacao, filtroAtivo }: { colabs: ColabPO[]; p
   }, [colabs, pos, situacao, filtroAtivo])
 
   const cor = corSituacaoNR(situacao)
-  const dados = linhas.map(r => ({ 'Matrícula': r.matricula, 'Nome': r.nome, 'Base': r.base || '', 'Gerência': r.gerencia || '', 'Supervisor': r.supervisor || '', 'Função': r.funcao || '', 'Treinamento': r.treinamento, 'Vencimento': formatarData(r.vencimento), 'Dias': r.dias ?? '' }))
+  const dados = linhas.map(r => ({ 'Matrícula': r.matricula, 'Nome': r.nome, 'Base': r.base || '', 'Gerência': r.gerencia || '', 'Coordenador': r.supervisor || '', 'Função': r.funcao || '', 'Treinamento': r.treinamento, 'Vencimento': formatarData(r.vencimento), 'Dias': r.dias ?? '' }))
   return (
     <div style={{ backgroundColor: COR_CARD, borderRadius: 16, border: `1px solid ${COR_BORDA}`, overflow: 'hidden' }}>
       <div style={{ padding: '16px 20px', borderBottom: `1px solid ${COR_BORDA}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -637,7 +637,7 @@ function TabelaPO({ colabs, pos, situacao, filtroAtivo }: { colabs: ColabPO[]; p
       </div>
       <div style={{ overflowX: 'auto', overflowY: 'auto', maxHeight: 400 }}>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
-          <thead><tr style={{ backgroundColor: '#fafafa' }}>{['Matrícula', 'Nome', 'Base', 'Gerência', 'Supervisor', 'Função', 'Treinamento', 'Vencimento', 'Dias'].map(h => <th key={h} style={{ padding: '8px 12px', textAlign: 'left', fontWeight: 600, color: COR_TEXTO_SECUNDARIO, whiteSpace: 'nowrap', position: 'sticky', top: 0, backgroundColor: '#fafafa', borderBottom: `1px solid ${COR_BORDA}`, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.3px' }}>{h}</th>)}</tr></thead>
+          <thead><tr style={{ backgroundColor: '#fafafa' }}>{['Matrícula', 'Nome', 'Base', 'Gerência', 'Coordenador', 'Função', 'Treinamento', 'Vencimento', 'Dias'].map(h => <th key={h} style={{ padding: '8px 12px', textAlign: 'left', fontWeight: 600, color: COR_TEXTO_SECUNDARIO, whiteSpace: 'nowrap', position: 'sticky', top: 0, backgroundColor: '#fafafa', borderBottom: `1px solid ${COR_BORDA}`, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.3px' }}>{h}</th>)}</tr></thead>
           <tbody>
             {linhas.length === 0 ? <tr><td colSpan={9} style={{ padding: '32px', textAlign: 'center', color: '#ccc', fontSize: 13 }}>Nenhum registro nesta condição.</td></tr>
               : linhas.map((r, i) => {
@@ -677,7 +677,7 @@ function TabelaMed({ colabs, situacao, filtroAtivo }: { colabs: ColabMed[]; situ
   }, [colabs, situacao, filtroAtivo])
 
   const cor = corSituacaoMed(situacao)
-  const dados = linhas.map(r => ({ 'Matrícula': r.matricula, 'Nome': r.nome, 'Base': r.base || '', 'Gerência': r.gerencia || '', 'Supervisor': r.supervisor || '', 'Função': r.funcao || '', 'ASO': r.asoTipo || '', 'Vencimento': formatarData(r.asoVencimento), 'Dias': r.dias ?? '' }))
+  const dados = linhas.map(r => ({ 'Matrícula': r.matricula, 'Nome': r.nome, 'Base': r.base || '', 'Gerência': r.gerencia || '', 'Coordenador': r.supervisor || '', 'Função': r.funcao || '', 'ASO': r.asoTipo || '', 'Vencimento': formatarData(r.asoVencimento), 'Dias': r.dias ?? '' }))
   return (
     <div style={{ backgroundColor: COR_CARD, borderRadius: 16, border: `1px solid ${COR_BORDA}`, overflow: 'hidden' }}>
       <div style={{ padding: '16px 20px', borderBottom: `1px solid ${COR_BORDA}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -686,7 +686,7 @@ function TabelaMed({ colabs, situacao, filtroAtivo }: { colabs: ColabMed[]; situ
       </div>
       <div style={{ overflowX: 'auto', overflowY: 'auto', maxHeight: 400 }}>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
-          <thead><tr style={{ backgroundColor: '#fafafa' }}>{['Matrícula', 'Nome', 'Base', 'Gerência', 'Supervisor', 'Função', 'ASO', 'Vencimento', 'Dias'].map(h => <th key={h} style={{ padding: '8px 12px', textAlign: 'left', fontWeight: 600, color: COR_TEXTO_SECUNDARIO, whiteSpace: 'nowrap', position: 'sticky', top: 0, backgroundColor: '#fafafa', borderBottom: `1px solid ${COR_BORDA}`, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.3px' }}>{h}</th>)}</tr></thead>
+          <thead><tr style={{ backgroundColor: '#fafafa' }}>{['Matrícula', 'Nome', 'Base', 'Gerência', 'Coordenador', 'Função', 'ASO', 'Vencimento', 'Dias'].map(h => <th key={h} style={{ padding: '8px 12px', textAlign: 'left', fontWeight: 600, color: COR_TEXTO_SECUNDARIO, whiteSpace: 'nowrap', position: 'sticky', top: 0, backgroundColor: '#fafafa', borderBottom: `1px solid ${COR_BORDA}`, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.3px' }}>{h}</th>)}</tr></thead>
           <tbody>
             {linhas.length === 0 ? <tr><td colSpan={9} style={{ padding: '32px', textAlign: 'center', color: '#ccc', fontSize: 13 }}>Nenhum registro nesta condição.</td></tr>
               : linhas.map((r, i) => {
@@ -719,7 +719,7 @@ function TabelaCNH({ colabs, situacao, filtroAtivo }: { colabs: ColabCNH[]; situ
     return filtrados.filter(c => getStatusCNHDashboard(c.numero_cnh, c.data_vencimento, c.exigencia) === situacao).map(c => ({ ...c, dias: getDias(c.data_vencimento) })).sort((a, b) => (a.dias ?? -9999) - (b.dias ?? -9999))
   }, [colabs, situacao, filtroAtivo])
 
-  const dados = linhas.map(r => ({ 'Matrícula': r.matricula, 'Nome': r.nome, 'Base': r.base || '', 'Gerência': r.gerencia || '', 'Supervisor': r.supervisor || '', 'Função': r.funcao || '', 'Categoria': r.categoria || '', 'Vencimento': formatarData(r.data_vencimento), 'Dias': r.dias ?? '' }))
+  const dados = linhas.map(r => ({ 'Matrícula': r.matricula, 'Nome': r.nome, 'Base': r.base || '', 'Gerência': r.gerencia || '', 'Coordenador': r.supervisor || '', 'Função': r.funcao || '', 'Categoria': r.categoria || '', 'Vencimento': formatarData(r.data_vencimento), 'Dias': r.dias ?? '' }))
   return (
     <div style={{ backgroundColor: COR_CARD, borderRadius: 16, border: `1px solid ${COR_BORDA}`, overflow: 'hidden' }}>
       <div style={{ padding: '16px 20px', borderBottom: `1px solid ${COR_BORDA}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -728,7 +728,7 @@ function TabelaCNH({ colabs, situacao, filtroAtivo }: { colabs: ColabCNH[]; situ
       </div>
       <div style={{ overflowX: 'auto', overflowY: 'auto', maxHeight: 400 }}>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
-          <thead><tr style={{ backgroundColor: '#fafafa' }}>{['Matrícula', 'Nome', 'Base', 'Gerência', 'Supervisor', 'Função', 'Categoria', 'Vencimento', 'Dias'].map(h => <th key={h} style={{ padding: '8px 12px', textAlign: 'left', fontWeight: 600, color: COR_TEXTO_SECUNDARIO, whiteSpace: 'nowrap', position: 'sticky', top: 0, backgroundColor: '#fafafa', borderBottom: `1px solid ${COR_BORDA}`, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.3px' }}>{h}</th>)}</tr></thead>
+          <thead><tr style={{ backgroundColor: '#fafafa' }}>{['Matrícula', 'Nome', 'Base', 'Gerência', 'Coordenador', 'Função', 'Categoria', 'Vencimento', 'Dias'].map(h => <th key={h} style={{ padding: '8px 12px', textAlign: 'left', fontWeight: 600, color: COR_TEXTO_SECUNDARIO, whiteSpace: 'nowrap', position: 'sticky', top: 0, backgroundColor: '#fafafa', borderBottom: `1px solid ${COR_BORDA}`, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.3px' }}>{h}</th>)}</tr></thead>
           <tbody>
             {linhas.length === 0 ? <tr><td colSpan={9} style={{ padding: '32px', textAlign: 'center', color: '#ccc', fontSize: 13 }}>Nenhum registro nesta condição.</td></tr>
               : linhas.map((r, i) => {
@@ -767,7 +767,7 @@ function SecaoGraficosNR({ colabs, nrs, matriz, situacao, filtroAtivo, onFiltro 
         <GraficoHorizontal dados={dadosBase} cor={cor} titulo="Por Base"     vazio="Sem dados por base"    tipoAgrup="base"      filtroAtivo={filtroAtivo} onFiltro={onFiltro} />
         <GraficoHorizontal dados={dadosGer}  cor={cor} titulo="Por Gerência" vazio="Sem dados de gerência" tipoAgrup="gerencia" filtroAtivo={filtroAtivo} onFiltro={onFiltro} />
       </div>
-      <GraficoVertical dados={dadosSup} cor={cor} titulo="Por Supervisor" vazio="Sem dados de supervisor" tipoAgrup="supervisor" filtroAtivo={filtroAtivo} onFiltro={onFiltro} />
+      <GraficoVertical dados={dadosSup} cor={cor} titulo="Por Coordenador" vazio="Sem dados de supervisor" tipoAgrup="supervisor" filtroAtivo={filtroAtivo} onFiltro={onFiltro} />
     </div>
   )
 }
@@ -782,7 +782,7 @@ function SecaoGraficosPO({ colabs, pos, situacao, filtroAtivo, onFiltro }: { col
         <GraficoHorizontal dados={dadosBase} cor={cor} titulo="Por Base"     vazio="Sem dados por base"    tipoAgrup="base"      filtroAtivo={filtroAtivo} onFiltro={onFiltro} />
         <GraficoHorizontal dados={dadosGer}  cor={cor} titulo="Por Gerência" vazio="Sem dados de gerência" tipoAgrup="gerencia" filtroAtivo={filtroAtivo} onFiltro={onFiltro} />
       </div>
-      <GraficoVertical dados={dadosSup} cor={cor} titulo="Por Supervisor" vazio="Sem dados de supervisor" tipoAgrup="supervisor" filtroAtivo={filtroAtivo} onFiltro={onFiltro} />
+      <GraficoVertical dados={dadosSup} cor={cor} titulo="Por Coordenador" vazio="Sem dados de supervisor" tipoAgrup="supervisor" filtroAtivo={filtroAtivo} onFiltro={onFiltro} />
     </div>
   )
 }
@@ -797,7 +797,7 @@ function SecaoGraficosMed({ colabs, situacao, filtroAtivo, onFiltro }: { colabs:
         <GraficoHorizontal dados={dadosBase} cor={cor} titulo="Por Base"     vazio="Sem dados por base"    tipoAgrup="base"      filtroAtivo={filtroAtivo} onFiltro={onFiltro} />
         <GraficoHorizontal dados={dadosGer}  cor={cor} titulo="Por Gerência" vazio="Sem dados de gerência" tipoAgrup="gerencia" filtroAtivo={filtroAtivo} onFiltro={onFiltro} />
       </div>
-      <GraficoVertical dados={dadosSup} cor={cor} titulo="Por Supervisor" vazio="Sem dados de supervisor" tipoAgrup="supervisor" filtroAtivo={filtroAtivo} onFiltro={onFiltro} />
+      <GraficoVertical dados={dadosSup} cor={cor} titulo="Por Coordenador" vazio="Sem dados de supervisor" tipoAgrup="supervisor" filtroAtivo={filtroAtivo} onFiltro={onFiltro} />
     </div>
   )
 }
@@ -812,7 +812,7 @@ function SecaoGraficosCNH({ colabs, situacao, filtroAtivo, onFiltro }: { colabs:
         <GraficoHorizontal dados={dadosBase} cor={cor} titulo="Por Base"     vazio="Sem dados por base"    tipoAgrup="base"      filtroAtivo={filtroAtivo} onFiltro={onFiltro} />
         <GraficoHorizontal dados={dadosGer}  cor={cor} titulo="Por Gerência" vazio="Sem dados de gerência" tipoAgrup="gerencia" filtroAtivo={filtroAtivo} onFiltro={onFiltro} />
       </div>
-      <GraficoVertical dados={dadosSup} cor={cor} titulo="Por Supervisor" vazio="Sem dados de supervisor" tipoAgrup="supervisor" filtroAtivo={filtroAtivo} onFiltro={onFiltro} />
+      <GraficoVertical dados={dadosSup} cor={cor} titulo="Por Coordenador" vazio="Sem dados de supervisor" tipoAgrup="supervisor" filtroAtivo={filtroAtivo} onFiltro={onFiltro} />
     </div>
   )
 }
