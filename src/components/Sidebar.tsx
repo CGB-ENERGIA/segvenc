@@ -292,7 +292,7 @@ export default function Sidebar() {
     },
     { label: 'Medicina do Trabalho',   href: '/med-trab',             niveis: [] as string[],                        modulo: 'medicina' },
     { label: 'Gerar ASO',              href: '/gerar-aso',            niveis: [] as string[],                        modulo: 'gerar_aso' },
-    { label: 'CNH',                    href: '/cnh',                  niveis: ['admin', 'operador'],                 modulo: null },
+    { label: 'CNH',                    href: '/cnh',                  niveis: [] as string[],                        modulo: 'cnh' },
     { label: 'Colaboradores',          href: '/colaboradores',        niveis: ['admin', 'operador'],                 modulo: null },
     { label: 'Auditoria',              href: '/auditoria',            niveis: ['admin', 'operador'],                 modulo: null },
     { label: 'Configurações',          href: '/configuracoes',        niveis: ['admin'],                             modulo: null },

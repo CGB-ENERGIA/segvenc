@@ -107,10 +107,12 @@ function gerarExport(colabs: Colaborador[], nrs: NR[], matriz: MatrizTreinamento
       'Admissão': formatarData(c.data_admissao), 'Situação': c.situacao,
       'Gerência': c.gerencia || '', 'Coordenador': c.supervisor || ''
     }
-    nrs.forEach(nr => {
+nrs.forEach(nr => {
       const obrig = getObrigatoriedade(matriz, c.funcoes?.nome || null, c.processo, nr.nome)
-      if (obrig === 'NA') { l[nr.nome] = 'N/A'; return }
       const r = c.registros_exames.find(r => r.regra_id === nr.id)
+      // Só marca N/A quando NÃO há curso lançado. Havendo registro, exporta o
+      // curso mesmo a função sendo NA (curso opcional/extra).
+      if (obrig === 'NA' && !r) { l[nr.nome] = 'N/A'; return }
       if (!r) { l[nr.nome] = obrig === 'SIM' ? 'Falta fazer' : 'Sem registro'; return }
       if (nr.validade_dias === null) { l[nr.nome] = 'Possui'; return }
       const s = getStatus(r.data_vencimento!)
@@ -266,10 +268,15 @@ function CelulaNR({ reg, semPrazo, onClick, onIcone, compacto, obrig }: {
 }) {
   const pad = compacto ? '6px 8px' : '8px 12px'; const minW = compacto ? 100 : 130
   const base: React.CSSProperties = { padding: pad, textAlign: 'center', verticalAlign: 'middle', minWidth: minW, borderBottom: '1px solid #f5f5f5', borderRight: '1px solid #f0f0f0' }
+  const naoObrig = obrig === 'NAO' || obrig === 'NA'
 
-  if (obrig === 'NA') return (
-    <td style={{ ...base, background: 'repeating-linear-gradient(45deg,#fdfdfd,#fdfdfd 8px,#efefef 8px,#efefef 16px)', cursor: 'not-allowed' }} title="Não se aplica a esta função">
-      <span style={{ fontSize: 11, color: '#ccc', fontStyle: 'italic' }}>N/A</span>
+  // NA SEM registro → hachura, mas clicável para registrar o curso mesmo assim
+  if (obrig === 'NA' && !reg) return (
+    <td style={{ ...base, background: 'repeating-linear-gradient(45deg,#fdfdfd,#fdfdfd 8px,#efefef 8px,#efefef 16px)', cursor: 'pointer' }} onClick={onClick} title="Não se aplica a esta função — clique para registrar o curso mesmo assim">
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3 }}>
+        <span style={{ fontSize: 11, color: '#ccc', fontStyle: 'italic' }}>N/A</span>
+        <Icone tipo="plus" cor="#ccc" size={12} />
+      </div>
     </td>
   )
 
@@ -313,13 +320,11 @@ function CelulaNR({ reg, semPrazo, onClick, onIcone, compacto, obrig }: {
   const temArq = !!reg.url_arquivo
   const aud = [...(reg.logs_auditoria || [])].sort((a, b) => new Date(b.data_auditoria).getTime() - new Date(a.data_auditoria).getTime())[0]
   const prog = [...(reg.programacoes || [])].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0]
-  const bgMap: Record<string, string> = obrig === 'NAO'
-    ? { valido: '#f4f4f4', critico: '#fafafa', atencao: '#fafafa', vencido: '#fafafa' }
-    : { valido: '#f0fdf4', critico: '#fffbeb', atencao: '#fef9c3', vencido: '#fef2f2' }
+  const bgMap: Record<string, string> = { valido: '#f0fdf4', critico: '#fffbeb', atencao: '#fef9c3', vencido: '#fef2f2' }
 
   return <td style={{ ...base, backgroundColor: bgMap[st], cursor: 'pointer' }} onClick={onClick}>
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
-      <span style={{ fontSize: compacto ? 10 : 11, color: obrig === 'NAO' ? '#888' : '#555', fontWeight: 500 }}>{formatarData(reg.data_vencimento)}</span>
+      <span style={{ fontSize: compacto ? 10 : 11, color: '#555', fontWeight: 500 }}>{formatarData(reg.data_vencimento)}</span>
       <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
         <span onClick={e => { e.stopPropagation(); onIcone('documento') }} style={{ cursor: 'pointer', display: 'flex' }}><Icone tipo="clipe" cor={temArq ? '#2563eb' : '#9ca3af'} size={13} /></span>
         {!aud && <Icone tipo="relogio" cor="#9ca3af" titulo="Pendente" size={13} />}
@@ -348,7 +353,7 @@ function ModalNovoTrein({ colab, nrs, onClose, onUpdate, email }: { colab: Colab
       setForm(f => ({ ...f, data_vencimento: d.toISOString().split('T')[0] }))
     } else if (semPrazo) setForm(f => ({ ...f, data_vencimento: '' }))
   }, [form.regra_id, form.data_realizacao, nrSel, semPrazo])
-  
+
   async function salvar() {
     if (!form.regra_id || !form.data_realizacao) { setErro('Preencha o tipo de NR e a data.'); return }
     setSalvando(true); setErro('')
@@ -356,19 +361,19 @@ function ModalNovoTrein({ colab, nrs, onClose, onUpdate, email }: { colab: Colab
       await supabase.from('registros_exames').update({ is_atual: false }).eq('matricula_colaborador', colab.matricula).eq('regra_id', parseInt(form.regra_id))
       const { data: novo, error: e } = await supabase.from('registros_exames').insert({ matricula_colaborador: colab.matricula, regra_id: parseInt(form.regra_id), data_realizacao: form.data_realizacao, data_vencimento: semPrazo ? null : form.data_vencimento || null, is_atual: true }).select().single()
       if (e) throw new Error(e.message)
-      
+
       // Upload para R2
       if (arquivo && novo) {
         const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19); const ext = arquivo.name.split('.').pop()
         const path = `${colab.matricula}/${form.regra_id}/${ts}.${ext}`
-        
+
         const formData = new FormData()
         formData.append('file', arquivo)
         formData.append('key', path)
-        
+
         const res = await fetch('/api/r2/upload', { method: 'POST', body: formData })
         if (!res.ok) throw new Error('Falha no upload do documento')
-        
+
         await supabase.from('registros_exames').update({ url_arquivo: path }).eq('id', novo.id)
       }
       onUpdate(); onClose()
@@ -413,6 +418,155 @@ function ModalNovoTrein({ colab, nrs, onClose, onUpdate, email }: { colab: Colab
   )
 }
 
+// ─── MODAL INCLUIR CURSO MANUAL ───────────────────────────────────────────────
+// Diferença para o ModalNovoTrein: aqui o colaborador NÃO vem pronto — você
+// busca qualquer colaborador (inclusive de função fora da matriz) e lança a NR.
+function ModalCursoManual({ nrs, onClose, onUpdate, email }: { nrs: NR[]; onClose: () => void; onUpdate: () => void; email: string }) {
+  const [busca, setBusca] = useState('')
+  const [resultados, setResultados] = useState<any[]>([])
+  const [buscando, setBuscando] = useState(false)
+  const [colabSel, setColabSel] = useState<any | null>(null)
+  const [form, setForm] = useState({ regra_id: '', data_realizacao: '', data_vencimento: '' })
+  const [arquivo, setArquivo] = useState<File | null>(null)
+  const [salvando, setSalvando] = useState(false)
+  const [erro, setErro] = useState('')
+  const fileRef = useRef<HTMLInputElement>(null)
+  const nrSel = nrs.find(n => n.id === parseInt(form.regra_id)); const semPrazo = nrSel?.validade_dias === null
+
+  // Busca de colaboradores em TODA a base (não só os da matriz), com debounce
+  useEffect(() => {
+    if (colabSel) return
+    const termo = busca.trim()
+    if (termo.length < 2) { setResultados([]); return }
+    let ativo = true
+    setBuscando(true)
+    const t = setTimeout(async () => {
+      const { data } = await supabase.from('colaboradores')
+        .select('matricula,nome,processo,situacao,funcoes(nome),bases(nome)')
+        .or(`nome.ilike.%${termo}%,matricula.ilike.%${termo}%`)
+        .order('nome').limit(20)
+      if (ativo) { setResultados(data || []); setBuscando(false) }
+    }, 300)
+    return () => { ativo = false; clearTimeout(t) }
+  }, [busca, colabSel])
+
+  // Vencimento automático = realização + validade_dias da NR (igual ao ModalNovoTrein)
+  useEffect(() => {
+    if (form.regra_id && form.data_realizacao && nrSel && nrSel.validade_dias !== null) {
+      const d = new Date(form.data_realizacao + 'T12:00:00'); d.setDate(d.getDate() + nrSel.validade_dias)
+      setForm(f => ({ ...f, data_vencimento: d.toISOString().split('T')[0] }))
+    } else if (semPrazo) setForm(f => ({ ...f, data_vencimento: '' }))
+  }, [form.regra_id, form.data_realizacao, nrSel, semPrazo])
+
+  async function salvar() {
+    if (!colabSel) { setErro('Selecione um colaborador.'); return }
+    if (!form.regra_id || !form.data_realizacao) { setErro('Preencha o tipo de NR e a data.'); return }
+    setSalvando(true); setErro('')
+    try {
+      // Mantém histórico: marca registros anteriores da mesma NR como não-atuais
+      await supabase.from('registros_exames').update({ is_atual: false })
+        .eq('matricula_colaborador', colabSel.matricula).eq('regra_id', parseInt(form.regra_id))
+      const { data: novo, error: e } = await supabase.from('registros_exames').insert({
+        matricula_colaborador: colabSel.matricula,
+        regra_id: parseInt(form.regra_id),
+        data_realizacao: form.data_realizacao,
+        data_vencimento: semPrazo ? null : form.data_vencimento || null,
+        is_atual: true,
+      }).select().single()
+      if (e) throw new Error(e.message)
+
+      // Upload opcional para o R2
+      if (arquivo && novo) {
+        const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19); const ext = arquivo.name.split('.').pop()
+        const path = `${colabSel.matricula}/${form.regra_id}/${ts}.${ext}`
+        const formData = new FormData(); formData.append('file', arquivo); formData.append('key', path)
+        const res = await fetch('/api/r2/upload', { method: 'POST', body: formData })
+        if (!res.ok) throw new Error('Falha no upload do documento')
+        await supabase.from('registros_exames').update({ url_arquivo: path }).eq('id', novo.id)
+      }
+      onUpdate(); onClose()
+    } catch (e: any) { setErro(e.message || 'Erro ao salvar') }
+    setSalvando(false)
+  }
+
+  const inp: React.CSSProperties = { width: '100%', height: 38, border: '1px solid #e0e0e0', borderRadius: 8, padding: '0 12px', fontSize: 13, boxSizing: 'border-box', outline: 'none', backgroundColor: 'white' }
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 300 }}>
+      <div style={{ backgroundColor: 'white', borderRadius: 16, padding: 28, width: '100%', maxWidth: 480, boxShadow: '0 20px 60px rgba(0,0,0,0.2)' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 }}>
+          <div>
+            <h2 style={{ fontSize: 16, fontWeight: 600, color: '#1a1a1a', margin: 0 }}>Incluir curso manual</h2>
+            <p style={{ fontSize: 13, color: '#888', margin: '3px 0 0' }}>Registra uma NR para qualquer colaborador, mesmo fora da matriz</p>
+          </div>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: '#aaa' }}>✕</button>
+        </div>
+
+        {/* Passo 1 — escolher o colaborador */}
+        {!colabSel ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div>
+              <label style={{ fontSize: 12, color: '#666', display: 'block', marginBottom: 4 }}>Colaborador *</label>
+              <input autoFocus type="text" value={busca} onChange={e => setBusca(e.target.value)} placeholder="Nome ou matrícula..." style={inp} />
+            </div>
+            <div style={{ maxHeight: 260, overflowY: 'auto', border: resultados.length ? '1px solid #f0f0f0' : 'none', borderRadius: 8 }}>
+              {buscando
+                ? <p style={{ fontSize: 13, color: '#aaa', padding: '8px 4px' }}>Buscando...</p>
+                : busca.trim().length >= 2 && resultados.length === 0
+                  ? <p style={{ fontSize: 13, color: '#aaa', padding: '8px 4px' }}>Nenhum colaborador encontrado.</p>
+                  : resultados.map(c => (
+                    <button key={c.matricula} onClick={() => { setColabSel(c); setResultados([]); setBusca('') }}
+                      style={{ width: '100%', textAlign: 'left', padding: '10px 12px', border: 'none', borderBottom: '1px solid #f5f5f5', background: 'white', cursor: 'pointer' }}
+                      onMouseEnter={e => e.currentTarget.style.backgroundColor = '#fdf2f5'}
+                      onMouseLeave={e => e.currentTarget.style.backgroundColor = 'white'}>
+                      <span style={{ fontSize: 13, fontWeight: 500, color: '#333' }}>{c.nome}</span>
+                      <span style={{ fontSize: 12, color: '#888', marginLeft: 8 }}>{c.matricula} · {c.funcoes?.nome || 'Sem função'}</span>
+                    </button>
+                  ))}
+            </div>
+          </div>
+        ) : (
+          /* Passo 2 — lançar a NR */
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#f9f9f9', borderRadius: 8, padding: '10px 14px' }}>
+              <div>
+                <p style={{ fontSize: 13, fontWeight: 600, color: '#333', margin: 0 }}>{colabSel.nome}</p>
+                <p style={{ fontSize: 12, color: '#888', margin: '2px 0 0' }}>{colabSel.matricula} · {colabSel.funcoes?.nome || 'Sem função'}</p>
+              </div>
+              <button onClick={() => setColabSel(null)} style={{ fontSize: 12, color: COR, background: 'none', border: 'none', cursor: 'pointer' }}>Trocar</button>
+            </div>
+
+            <div>
+              <label style={{ fontSize: 12, color: '#666', display: 'block', marginBottom: 4 }}>Tipo de NR *</label>
+              <select value={form.regra_id} onChange={e => setForm(f => ({ ...f, regra_id: e.target.value }))} style={inp}>
+                <option value="">Selecione...</option>{nrs.map(n => <option key={n.id} value={n.id}>{n.nome}</option>)}
+              </select>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: semPrazo ? '1fr' : '1fr 1fr', gap: 12 }}>
+              <div><label style={{ fontSize: 12, color: '#666', display: 'block', marginBottom: 4 }}>Data de realização *</label><input type="date" value={form.data_realizacao} onChange={e => setForm(f => ({ ...f, data_realizacao: e.target.value }))} style={inp} /></div>
+              {!semPrazo && <div><label style={{ fontSize: 12, color: '#666', display: 'block', marginBottom: 4 }}>Vencimento</label><input type="date" value={form.data_vencimento} onChange={e => setForm(f => ({ ...f, data_vencimento: e.target.value }))} style={{ ...inp, backgroundColor: form.data_vencimento ? '#f0fdf4' : 'white' }} />{form.data_vencimento && <p style={{ fontSize: 11, color: '#16a34a', margin: '3px 0 0' }}>✓ Calculado automaticamente</p>}</div>}
+            </div>
+            {semPrazo && <div style={{ backgroundColor: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 8, padding: '8px 12px' }}><p style={{ fontSize: 12, color: '#16a34a', margin: 0 }}>✓ Esta NR não possui prazo de vencimento</p></div>}
+            <div>
+              <label style={{ fontSize: 12, color: '#666', display: 'block', marginBottom: 4 }}>Documento <span style={{ color: '#aaa' }}>(opcional)</span></label>
+              <div onClick={() => fileRef.current?.click()} style={{ border: '2px dashed #e0e0e0', borderRadius: 10, padding: '16px 20px', textAlign: 'center', cursor: 'pointer', backgroundColor: '#fafafa' }}>
+                <Icone tipo="upload" cor="#aaa" size={22} /><p style={{ fontSize: 12, color: '#888', margin: '6px 0 0' }}>{arquivo ? arquivo.name : 'Clique para anexar'}</p>
+                <p style={{ fontSize: 11, color: '#bbb', margin: '2px 0 0' }}>PDF, JPG ou PNG</p>
+                <input ref={fileRef} type="file" accept=".pdf,.jpg,.jpeg,.png" style={{ display: 'none' }} onChange={e => setArquivo(e.target.files?.[0] || null)} />
+              </div>
+            </div>
+            {erro && <div style={{ backgroundColor: '#fef2f2', border: '1px solid #fca5a5', borderRadius: 8, padding: '8px 12px' }}><p style={{ fontSize: 12, color: '#dc2626', margin: 0 }}>{erro}</p></div>}
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 4 }}>
+              <button onClick={onClose} style={{ height: 38, padding: '0 18px', border: '1px solid #e0e0e0', borderRadius: 8, fontSize: 13, cursor: 'pointer', background: 'white', color: '#555' }}>Cancelar</button>
+              <button onClick={salvar} disabled={salvando} style={{ height: 38, padding: '0 22px', backgroundColor: COR, color: 'white', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 500, cursor: salvando ? 'not-allowed' : 'pointer', opacity: salvando ? 0.7 : 1 }}>{salvando ? 'Salvando...' : 'Salvar curso'}</button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 // ─── MODAL EXAME ──────────────────────────────────────────────────────────────
 function ModalExame({ dados, abaInicial, onClose, onUpdate, email, podeAuditar, nivel }: {
   dados: { colab: Colaborador; reg: Registro | undefined; nr: NR; abaInicial: AbaModal }
@@ -448,7 +602,7 @@ function ModalExame({ dados, abaInicial, onClose, onUpdate, email, podeAuditar, 
   }
 
   async function salvarProg() { if (!reg || !formProg.data_programada) { setErrProg('Informe a data.'); return } setSalvProg(true); setErrProg(''); const { error } = await supabase.from('programacoes_exames').insert({ registro_id: reg.id, matricula_colaborador: colab.matricula, regra_id: nr.id, data_programada: formProg.data_programada, observacao: formProg.observacao || null, criado_por: email }); if (error) { setErrProg(error.message); setSalvProg(false); return } setFormProg({ data_programada: '', observacao: '' }); setSalvProg(false); loadProgramacoes(); onUpdate() }
-  
+
   // Upload modificado para R2
   async function fazerUpload() {
     if (!arquivo || !reg) return;
@@ -456,18 +610,18 @@ function ModalExame({ dados, abaInicial, onClose, onUpdate, email, podeAuditar, 
     const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
     const ext = arquivo.name.split('.').pop();
     const path = `${colab.matricula}/${nr.id}/${ts}.${ext}`;
-    
+
     try {
       const formData = new FormData();
       formData.append('file', arquivo);
       formData.append('key', path);
-      
+
       const res = await fetch('/api/r2/upload', { method: 'POST', body: formData });
       if (!res.ok) throw new Error('Falha no upload para o R2');
-      
+
       const { error: de } = await supabase.from('registros_exames').update({ url_arquivo: path }).eq('id', reg.id);
       if (de) throw de;
-      
+
       setArquivo(null);
       onUpdate();
       onClose();
@@ -483,14 +637,14 @@ function ModalExame({ dados, abaInicial, onClose, onUpdate, email, podeAuditar, 
 
   const auds = [...(reg?.logs_auditoria || [])].sort((a, b) => new Date(b.data_auditoria).getTime() - new Date(a.data_auditoria).getTime())
 
-const abas: { key: AbaModal; label: string }[] = [
-  { key: 'info', label: 'Informações' },
-  ...(nivel !== 'visualizador' ? [
-    { key: 'documento' as AbaModal, label: 'Documento' },
-    { key: 'programacao' as AbaModal, label: 'Programação' },
-  ] : []),
-  { key: 'historico' as AbaModal, label: 'Histórico' },
-]
+  const abas: { key: AbaModal; label: string }[] = [
+    { key: 'info', label: 'Informações' },
+    ...(nivel !== 'visualizador' ? [
+      { key: 'documento' as AbaModal, label: 'Documento' },
+      { key: 'programacao' as AbaModal, label: 'Programação' },
+    ] : []),
+    { key: 'historico', label: 'Histórico' },
+  ]
 
   const inp: React.CSSProperties = { width: '100%', height: 38, border: '1px solid #e0e0e0', borderRadius: 8, padding: '0 12px', fontSize: 13, boxSizing: 'border-box', outline: 'none' }
 
@@ -677,6 +831,7 @@ export default function BaseNRPage() {
   const [ordDir, setOrdDir] = useState<OrdemDirecao>('asc')
   const [modalExame, setModalExame] = useState<{ colab: Colaborador; reg: Registro | undefined; nr: NR; abaInicial: AbaModal } | null>(null)
   const [modalNovo, setModalNovo] = useState<Colaborador | null>(null)
+  const [modalManual, setModalManual] = useState(false)
 
   const gerenciasDisp = useMemo(() => [...new Set(colabs.map(c => c.gerencia).filter(Boolean) as string[])].sort(), [colabs])
   const supervisoresDisp = useMemo(() => [...new Set(colabs.map(c => c.supervisor).filter(Boolean) as string[])].sort(), [colabs])
@@ -727,20 +882,25 @@ export default function BaseNRPage() {
       setFiltroSits(sitsIniciais)
       todos = todos.filter((c: any) => sitsIniciais.includes(c.situacao))
     }
-    const colabsFiltrados = matrizB.length === 0 ? todos : todos.filter(c => {
+
+    const rids = nrsB.map(n => n.id)
+    const naMatriz = (c: any) => {
       const fnome = c.funcoes?.nome; if (!fnome) return false
       return matrizB.some(m => {
         const mF = m.funcao.trim().toUpperCase(); const fC = fnome.trim().toUpperCase()
         if (m.processo && m.processo.trim() !== '') return mF === fC && m.processo.trim().toUpperCase() === (c.processo || '').trim().toUpperCase()
         return mF === fC
       })
-    })
-    const mats = colabsFiltrados.map((c: any) => c.matricula); const rids = nrsB.map(n => n.id)
+    }
+
+    // Busca registros (NRs alvo, vigentes) de TODOS os colaboradores filtrados,
+    // para descobrir quem tem curso lançado mesmo fora da matriz.
+    const matsTodos = todos.map((c: any) => c.matricula)
     let regs: any[] = []
-    if (mats.length > 0 && rids.length > 0) {
+    if (matsTodos.length > 0 && rids.length > 0) {
       const LOTE = 100
-      for (let i = 0; i < mats.length; i += LOTE) {
-        const loteMats = mats.slice(i, i + LOTE)
+      for (let i = 0; i < matsTodos.length; i += LOTE) {
+        const loteMats = matsTodos.slice(i, i + LOTE)
         let fromReg = 0
         while (true) {
           const { data: rd } = await supabase.from('registros_exames')
@@ -756,6 +916,13 @@ export default function BaseNRPage() {
         }
       }
     }
+    const matsComCurso = new Set(regs.map((r: any) => r.matricula_colaborador))
+
+    // Aparece na matriz quem bate com a matriz OU tem curso lançado.
+    const colabsFiltrados = matrizB.length === 0
+      ? todos
+      : todos.filter((c: any) => naMatriz(c) || matsComCurso.has(c.matricula))
+
     setColabs(colabsFiltrados.map((c: any) => ({
       ...c,
       registros_exames: (regs || []).filter((r: any) => r.matricula_colaborador === c.matricula).map((r: any) => ({ ...r, programacoes: r.programacoes_exames || [] }))
@@ -884,6 +1051,7 @@ export default function BaseNRPage() {
       {temFiltro && <button onClick={limpar} style={{ height: 36, padding: '0 12px', fontSize: 12, border: '1px solid #fca5a5', borderRadius: 8, backgroundColor: '#fef2f2', color: '#dc2626', cursor: 'pointer' }}>✕ Limpar</button>}
       <button onClick={() => setCompacto(c => !c)} style={{ height: 36, padding: '0 12px', fontSize: 12, border: `1px solid ${compacto ? COR : '#e0e0e0'}`, borderRadius: 8, backgroundColor: compacto ? '#fdf2f5' : 'white', color: compacto ? COR : '#555', cursor: 'pointer' }}>⊟ Compacto</button>
       {colunas.length > 0 && <SeletorColunas colunas={colsDef} visiveis={colunas} onChange={setColunas} />}
+      {podeEditar && <button onClick={() => setModalManual(true)} style={{ height: 36, padding: '0 14px', fontSize: 12, border: 'none', borderRadius: 8, backgroundColor: COR, color: 'white', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, fontWeight: 500 }}>+ Incluir curso manual</button>}
       <BotaoExportar onClick={t => { const d = gerarExport(ordenados, nrs, matriz); t === 'csv' ? exportCSV(d) : exportXLSX(d) }} />
     </div>
 
@@ -948,5 +1116,6 @@ export default function BaseNRPage() {
 
     {modalExame && <ModalExame dados={modalExame} abaInicial={modalExame.abaInicial} onClose={() => setModalExame(null)} onUpdate={() => buscarColabs(nrs, matriz)} email={usuario?.email || ''} podeAuditar={usuario?.pode_auditar || false} nivel={usuario?.nivel || 'visualizador'} />}
     {modalNovo && <ModalNovoTrein colab={modalNovo} nrs={nrs} onClose={() => setModalNovo(null)} onUpdate={() => buscarColabs(nrs, matriz)} email={usuario?.email || ''} />}
+    {modalManual && <ModalCursoManual nrs={nrs} onClose={() => setModalManual(false)} onUpdate={() => buscarColabs(nrs, matriz)} email={usuario?.email || ''} />}
   </div>
 }
