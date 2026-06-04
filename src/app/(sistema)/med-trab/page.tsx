@@ -70,10 +70,13 @@ async function visualizarDocumento(e: React.MouseEvent, urlOuKey: string) {
       const parts = key.split('documentos/')
       if (parts.length > 1) key = parts[1]
     }
-    const res = await fetch(`/api/r2/signed-url?key=${encodeURIComponent(key)}`)
+    const { data: { session } } = await supabase.auth.getSession()
+    const res = await fetch(`/api/r2/signed-url?key=${encodeURIComponent(key)}`, {
+      headers: { Authorization: `Bearer ${session?.access_token ?? ''}` },
+    })
     const data = await res.json()
     if (data.url) window.open(data.url, '_blank')
-    else alert('Erro ao gerar link de visualização.')
+    else alert(data.error || 'Erro ao gerar link de visualização.')
   } catch (err) {
     console.error(err)
     alert('Erro ao abrir o documento.')
@@ -438,46 +441,50 @@ const abas: { key: AbaModal; label: string }[] = [
           </div>}
 
           {/* ── HISTÓRICO ── */}
-          {aba === 'historico' && (
-            <div>
-              {loadHistorico
-                ? <p style={{ fontSize: 13, color: '#aaa' }}>Carregando...</p>
-                : historico.length === 0
-                  ? <div style={{ textAlign: 'center', padding: '40px 0', color: '#aaa' }}>
-                      <p style={{ fontSize: 28, margin: '0 0 8px' }}>📂</p>
-                      <p style={{ fontSize: 14 }}>Nenhum ASO anterior encontrado para este tipo.</p>
-                    </div>
-                  : historico.map((h, i) => {
-                      const aud = [...(h.logs_auditoria || [])].sort((a, b) => new Date(b.data_auditoria).getTime() - new Date(a.data_auditoria).getTime())[0]
-                      const semVencH = TIPOS_SEM_VENCIMENTO.includes(h.tipo)
-                      return (
-                        <div key={h.id} style={{ border: '1px solid #f0f0f0', borderRadius: 10, padding: '14px 16px', marginBottom: 10, borderLeft: '3px solid #e0e0e0' }}>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
-                            <div>
-                              <p style={{ fontSize: 13, fontWeight: 600, color: '#333', margin: 0 }}>📅 Realizado em: {formatarData(h.data_realizacao)}</p>
-                              {!semVencH && h.data_vencimento && <p style={{ fontSize: 12, color: '#888', margin: '3px 0 0' }}>Vencimento: {formatarData(h.data_vencimento)}</p>}
-                              {semVencH && <p style={{ fontSize: 12, color: '#16a34a', margin: '3px 0 0' }}>Sem prazo de vencimento</p>}
-                            </div>
-                            {i === 0 && <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 99, backgroundColor: '#f1f5f9', color: '#64748b' }}>mais recente</span>}
-                          </div>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                            {h.url_arquivo
-                              ? <a href="#" onClick={(e) => visualizarDocumento(e, h.url_arquivo!)} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#2563eb', textDecoration: 'none', padding: '4px 10px', backgroundColor: '#eff6ff', borderRadius: 6, border: '1px solid #bfdbfe' }}>
-                                  <Icone tipo="olho" cor="#2563eb" size={13} /> Ver documento
-                                </a>
-                              : <span style={{ fontSize: 12, color: '#aaa', display: 'flex', alignItems: 'center', gap: 4 }}><Icone tipo="clipe" cor="#ccc" size={13} /> Sem documento</span>}
-                            {!aud && <span style={{ fontSize: 12, color: '#aaa', display: 'flex', alignItems: 'center', gap: 4 }}><Icone tipo="relogio" cor="#ccc" size={13} /> Sem auditoria</span>}
-                            {aud?.validado && <span style={{ fontSize: 12, color: '#16a34a', display: 'flex', alignItems: 'center', gap: 4 }}><Icone tipo="check" cor="#16a34a" size={13} /> Validado</span>}
-                            {aud && !aud.validado && <span style={{ fontSize: 12, color: '#dc2626', display: 'flex', alignItems: 'center', gap: 4 }}><Icone tipo="x_circulo" cor="#dc2626" size={13} /> Reprovado</span>}
-                          </div>
-                          {aud?.observacao && <p style={{ fontSize: 12, color: '#888', margin: '8px 0 0', fontStyle: 'italic' }}>"{aud.observacao}"</p>}
-                          {h.observacao && <p style={{ fontSize: 12, color: '#888', margin: '6px 0 0' }}>Obs: {h.observacao}</p>}
-                        </div>
-                      )
-                    })
-              }
-            </div>
-          )}
+{aba === 'historico' && (
+  <div>
+    {loadHistorico
+      ? <p style={{ fontSize: 13, color: '#aaa' }}>Carregando...</p>
+      : historico.length === 0
+        ? <div style={{ textAlign: 'center', padding: '40px 0', color: '#aaa' }}>
+            <p style={{ fontSize: 28, margin: '0 0 8px' }}>📂</p>
+            <p style={{ fontSize: 14 }}>Nenhum ASO anterior encontrado para este tipo.</p>
+          </div>
+        : historico.map((h, i) => {
+            const aud = [...(h.logs_auditoria || [])].sort((a, b) => new Date(b.data_auditoria).getTime() - new Date(a.data_auditoria).getTime())[0]
+            const semVencH = TIPOS_SEM_VENCIMENTO.includes(h.tipo)
+            return (
+              <div key={h.id} style={{ border: '1px solid #f0f0f0', borderRadius: 10, padding: '14px 16px', marginBottom: 10, borderLeft: '3px solid #e0e0e0' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
+                  <div>
+                    <p style={{ fontSize: 13, fontWeight: 600, color: '#333', margin: 0 }}>📅 Realizado em: {formatarData(h.data_realizacao)}</p>
+                    {!semVencH && h.data_vencimento && <p style={{ fontSize: 12, color: '#888', margin: '3px 0 0' }}>Vencimento: {formatarData(h.data_vencimento)}</p>}
+                    {semVencH && <p style={{ fontSize: 12, color: '#16a34a', margin: '3px 0 0' }}>Sem prazo de vencimento</p>}
+                  </div>
+                  {i === 0 && <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 99, backgroundColor: '#f1f5f9', color: '#64748b' }}>mais recente</span>}
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                  {h.url_arquivo
+                    ? (nivel !== 'visualizador'
+                        ? <a href="#" onClick={(e) => visualizarDocumento(e, h.url_arquivo!)} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#2563eb', textDecoration: 'none', padding: '4px 10px', backgroundColor: '#eff6ff', borderRadius: 6, border: '1px solid #bfdbfe' }}>
+                            <Icone tipo="olho" cor="#2563eb" size={13} /> Ver documento
+                          </a>
+                        : <span style={{ fontSize: 12, color: '#aaa', display: 'flex', alignItems: 'center', gap: 4 }}>
+                            <Icone tipo="clipe" cor="#ccc" size={13} /> Documento anexado
+                          </span>)
+                    : <span style={{ fontSize: 12, color: '#aaa', display: 'flex', alignItems: 'center', gap: 4 }}><Icone tipo="clipe" cor="#ccc" size={13} /> Sem documento</span>}
+                  {!aud && <span style={{ fontSize: 12, color: '#aaa', display: 'flex', alignItems: 'center', gap: 4 }}><Icone tipo="relogio" cor="#ccc" size={13} /> Sem auditoria</span>}
+                  {aud?.validado && <span style={{ fontSize: 12, color: '#16a34a', display: 'flex', alignItems: 'center', gap: 4 }}><Icone tipo="check" cor="#16a34a" size={13} /> Validado</span>}
+                  {aud && !aud.validado && <span style={{ fontSize: 12, color: '#dc2626', display: 'flex', alignItems: 'center', gap: 4 }}><Icone tipo="x_circulo" cor="#dc2626" size={13} /> Reprovado</span>}
+                </div>
+                {aud?.observacao && <p style={{ fontSize: 12, color: '#888', margin: '8px 0 0', fontStyle: 'italic' }}>"{aud.observacao}"</p>}
+                {h.observacao && <p style={{ fontSize: 12, color: '#888', margin: '6px 0 0' }}>Obs: {h.observacao}</p>}
+              </div>
+            )
+          })
+    }
+  </div>
+)}
 
         </div>
       </div>

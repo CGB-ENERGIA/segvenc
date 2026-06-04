@@ -25,13 +25,22 @@ export async function uploadR2(
   return key
 }
 
-// URL assinada para download (expira em 1 hora)
+// URL assinada para visualização inline (expira em 1 hora)
 export async function getSignedDownloadUrl(key: string, expiresIn = 3600) {
+  const ext = key.split('.').pop()?.toLowerCase()
+  const contentType =
+    ext === 'pdf' ? 'application/pdf' :
+    ext === 'png' ? 'image/png' :
+    (ext === 'jpg' || ext === 'jpeg') ? 'image/jpeg' :
+    'application/octet-stream'
+
   return getSignedUrl(
     r2,
     new GetObjectCommand({
       Bucket: process.env.R2_BUCKET_NAME!,
       Key: key,
+      ResponseContentType: contentType,        // ← força o tipo certo, mesmo nos arquivos antigos
+      ResponseContentDisposition: 'inline',    // ← exibe na aba em vez de baixar
     }),
     { expiresIn }
   )
