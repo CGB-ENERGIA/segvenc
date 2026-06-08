@@ -1,7 +1,6 @@
-// app/api/.../upload-url/route.ts  (rota NOVA)
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
-import { getSignedUploadUrl } from '@/lib/r2'   // <- helper que vamos ADICIONAR no lib/r2
+import { getSignedDownloadUrl } from '@/lib/r2'
 
 const supabaseServer = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -9,8 +8,8 @@ const supabaseServer = createClient(
   { auth: { persistSession: false } }
 )
 
-export async function POST(req: NextRequest) {
-  const { key, contentType } = await req.json()
+export async function GET(req: NextRequest) {
+  const key = req.nextUrl.searchParams.get('key')
   if (!key) return NextResponse.json({ error: 'key obrigatória' }, { status: 400 })
 
   const token = (req.headers.get('authorization') || '').replace('Bearer ', '')
@@ -23,9 +22,9 @@ export async function POST(req: NextRequest) {
     .from('usuarios').select('nivel').eq('email', user.email).single()
 
   if (perfilErr || !perfil || perfil.nivel === 'visualizador') {
-    return NextResponse.json({ error: 'Sem permissão para enviar documentos.' }, { status: 403 })
+    return NextResponse.json({ error: 'Sem permissão para visualizar documentos.' }, { status: 403 })
   }
 
-  const url = await getSignedUploadUrl(key, contentType)
-  return NextResponse.json({ url, key })
+  const url = await getSignedDownloadUrl(key)
+  return NextResponse.json({ url })
 }
