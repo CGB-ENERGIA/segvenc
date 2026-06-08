@@ -10,7 +10,8 @@ export const r2 = new S3Client({
   },
 })
 
-// Upload de arquivo
+// Upload server-side — mantido para usos internos (imports/scripts/admin),
+// mas NÃO é mais usado pelo modal de documento (que passa a usar PUT direto).
 export async function uploadR2(
   key: string,        // ex: asos/123456/periodico/2026-05-21.pdf
   body: Buffer | Uint8Array,
@@ -23,6 +24,21 @@ export async function uploadR2(
     ContentType: contentType,
   }))
   return key
+}
+
+// URL assinada para UPLOAD direto via PUT (navegador → R2). Expira em 5 min.
+// ContentType propositalmente NÃO incluído na assinatura: o navegador envia o
+// Content-Type do arquivo sem risco de SignatureDoesNotMatch, e o tipo de
+// exibição já é forçado no download (getSignedDownloadUrl).
+export async function getSignedUploadUrl(key: string, expiresIn = 300) {
+  return getSignedUrl(
+    r2,
+    new PutObjectCommand({
+      Bucket: process.env.R2_BUCKET_NAME!,
+      Key: key,
+    }),
+    { expiresIn }
+  )
 }
 
 // URL assinada para visualização inline (expira em 1 hora)

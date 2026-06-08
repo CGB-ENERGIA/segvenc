@@ -83,6 +83,34 @@ async function visualizarDocumento(e: React.MouseEvent, urlOuKey: string) {
   }
 }
 
+// HELPER R2: envia um arquivo DIRETO pro R2 via URL assinada (PUT).
+// O arquivo não passa mais pelo nosso servidor — por isso acaba o erro 413.
+async function uploadParaR2(arquivo: File, key: string): Promise<void> {
+  // 1) Token da sessão (a rota /api/r2/upload-url exige autenticação)
+  const { data: { session } } = await supabase.auth.getSession()
+
+  // 2) Pede a URL assinada pra rota nova (manda só a key, SEM o arquivo)
+  const resUrl = await fetch('/api/r2/upload-url', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${session?.access_token ?? ''}`,
+    },
+    body: JSON.stringify({ key }),
+  })
+  if (!resUrl.ok) {
+    const err = await resUrl.json().catch(() => ({}))
+    throw new Error(err.error || 'Não foi possível gerar a URL de upload.')
+  }
+  const { url } = await resUrl.json()
+
+  // 3) Envia o arquivo DIRETO pro R2
+  const resPut = await fetch(url, { method: 'PUT', body: arquivo })
+  if (!resPut.ok) {
+    throw new Error('Falha no upload para o R2')
+  }
+}
+
 function getASOPrincipal(col: Colaborador): { aso: ASO; vencimento: string } | null {
   const candidatos: { aso: ASO; vencimento: string; peso: number }[] = []
   const per = getASOPorTipo(col.asos, 'periodico')
@@ -300,16 +328,8 @@ function ModalASO({ dados, abaInicial, onClose, onUpdate, email, podeAuditar, ni
     const ext = arquivo.name.split('.').pop();
     const path = `asos/${colab.matricula}/${tipo}/${ts}.${ext}`;
     
-    try {
-      const formData = new FormData();
-      formData.append('file', arquivo);
-      formData.append('key', path);
-      
-      const res = await fetch('/api/r2/upload', { method: 'POST', body: formData });
-      if (!res.ok) {
-        const errData = await res.json();
-        throw new Error(errData.error || 'Falha no upload para o R2');
-      }
+   try {
+      await uploadParaR2(arquivo, path);
 
       // Agora gravamos a "key" limpa (caminho) em vez da URL completa no banco
       const { error: de } = await supabase.from('asos').update({ url_arquivo: path }).eq('id', aso.id);
@@ -510,12 +530,7 @@ function ModalExameCompl({ colab, nomeExame, exame, onClose, onUpdate }: { colab
         const ext = arquivo.name.split('.').pop(); 
         const path = `exames_compl/${colab.matricula}/${nomeExame.replace(/\s/g, '_')}/${Date.now()}.${ext}`; 
         
-        const formData = new FormData();
-        formData.append('file', arquivo);
-        formData.append('key', path);
-        
-        const res = await fetch('/api/r2/upload', { method: 'POST', body: formData });
-        if (!res.ok) throw new Error('Falha no upload para o R2');
+        await uploadParaR2(arquivo, path);
         
         urlArquivo = path;
       }
@@ -605,16 +620,11 @@ function ModalNovoASO({ colab, onClose, onSalvo }: { colab: Colaborador; onClose
     try {
       let urlArquivo: string | null = null
       
-      if (arquivo) { 
+     if (arquivo) { 
         const ext = arquivo.name.split('.').pop(); 
         const path = `asos/${colab.matricula}/${tipo}/${Date.now()}.${ext}`; 
         
-        const formData = new FormData();
-        formData.append('file', arquivo);
-        formData.append('key', path);
-        
-        const res = await fetch('/api/r2/upload', { method: 'POST', body: formData });
-        if (!res.ok) throw new Error('Falha no upload para o R2');
+        await uploadParaR2(arquivo, path);
         
         urlArquivo = path;
       }
