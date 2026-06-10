@@ -4,6 +4,7 @@ import { useEffect, useState, useRef, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/lib/auth-context'
+import { uploadParaR2 } from '@/lib/r2-client'
 
 // ─── CONSTANTES ───────────────────────────────────────────────────────────────
 const COR = '#9f183c'
@@ -92,10 +93,13 @@ async function visualizarDocumento(e: React.MouseEvent, urlOuKey: string) {
       const parts = key.split('documentos/')
       if (parts.length > 1) key = parts[1]
     }
-    const res = await fetch(`/api/r2/signed-url?key=${encodeURIComponent(key)}`)
-    const data = await res.json()
-    if (data.url) window.open(data.url, '_blank')
-    else alert('Erro ao gerar link de visualização.')
+   const { data: { session } } = await supabase.auth.getSession()
+const res = await fetch(`/api/r2/signed-url?key=${encodeURIComponent(key)}`, {
+  headers: { Authorization: `Bearer ${session?.access_token ?? ''}` },
+})
+const data = await res.json()
+if (data.url) window.open(data.url, '_blank')
+else alert(data.error || 'Erro ao gerar link de visualização.')
   } catch (err) {
     console.error(err)
     alert('Erro ao abrir o documento.')
@@ -270,13 +274,7 @@ function ModalCNH({ colab, cnh, onClose, onUpdate, nivel }: {
         const ext = arquivo.name.split('.').pop()
         const path = `cnhs/${colab.matricula}/${Date.now()}.${ext}`
         
-        const formData = new FormData()
-        formData.append('file', arquivo)
-        formData.append('key', path)
-        
-        const res = await fetch('/api/r2/upload', { method: 'POST', body: formData })
-        if (!res.ok) throw new Error('Falha no upload do documento')
-        
+        await uploadParaR2(arquivo, path)
         urlArquivo = path
       }
 
@@ -399,9 +397,9 @@ function ModalCNH({ colab, cnh, onClose, onUpdate, nivel }: {
                       </div>
                     : <button onClick={() => setConfirmaExc(true)} style={{ height: 36, padding: '0 14px', fontSize: 12, border: '1px solid #fca5a5', borderRadius: 8, backgroundColor: '#fef2f2', color: '#dc2626', cursor: 'pointer' }}>🗑 Excluir</button>
                 )}
-                <div style={{ display: 'flex', gap: 10, marginLeft: 'auto' }}>
-                  <button onClick={onClose} style={{ height: 38, padding: '0 18px', border: '1px solid #e0e0e0', borderRadius: 8, fontSize: 13, cursor: 'pointer', background: 'white', color: '#555' }}>Cancelar</button>
-                  <button onClick={salvar} disabled={salvando} style={{ height: 38, padding: '0 22px', backgroundColor: COR, color: 'white', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 500, cursor: salvando ? 'not-allowed' : 'pointer', opacity: salvando ? 0.7 : 1 }}>{salvando ? 'Salvando...' : 'Salvar'}</button>
+               <div style={{ display: 'flex', gap: 10, marginLeft: 'auto' }}>
+                  <button onClick={onClose} style={{ height: 38, padding: '0 18px', border: '1px solid #e0e0e0', borderRadius: 8, fontSize: 13, cursor: 'pointer', background: 'white', color: '#555' }}>{nivel === 'visualizador' ? 'Fechar' : 'Cancelar'}</button>
+                  {nivel !== 'visualizador' && <button onClick={salvar} disabled={salvando} style={{ height: 38, padding: '0 22px', backgroundColor: COR, color: 'white', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 500, cursor: salvando ? 'not-allowed' : 'pointer', opacity: salvando ? 0.7 : 1 }}>{salvando ? 'Salvando...' : 'Salvar'}</button>}
                 </div>
               </div>
             </div>
@@ -473,13 +471,7 @@ function ModalNovaCNH({ onClose, onSalvo }: { onClose: () => void; onSalvo: () =
         const ext = arquivo.name.split('.').pop()
         const path = `cnhs/${colabSel.matricula}/${Date.now()}.${ext}`
         
-        const formData = new FormData()
-        formData.append('file', arquivo)
-        formData.append('key', path)
-        
-        const res = await fetch('/api/r2/upload', { method: 'POST', body: formData })
-        if (!res.ok) throw new Error('Falha no upload do documento')
-        
+        await uploadParaR2(arquivo, path)
         urlArquivo = path
       }
 
@@ -782,7 +774,7 @@ const filtrados = useMemo(() => statsFiltrados.filter(c => {
           <h1 style={{ fontSize: 18, fontWeight: 600, color: '#1a1a1a', margin: 0 }}>CNH</h1>
           <p style={{ fontSize: 12, color: '#888', margin: '3px 0 0', fontWeight: 500 }}>Controle de Carteiras Nacionais de Habilitação</p>
         </div>
-        <button onClick={() => setModalNova(true)} style={{ height: 36, backgroundColor: COR, color: 'white', border: 'none', borderRadius: 8, padding: '0 18px', fontSize: 13, fontWeight: 500, cursor: 'pointer' }}>+ Nova CNH</button>
+       {podeEditar && <button onClick={() => setModalNova(true)} style={{ height: 36, backgroundColor: COR, color: 'white', border: 'none', borderRadius: 8, padding: '0 18px', fontSize: 13, fontWeight: 500, cursor: 'pointer' }}>+ Nova CNH</button>}
       </div>
 
       {/* CARDS */}

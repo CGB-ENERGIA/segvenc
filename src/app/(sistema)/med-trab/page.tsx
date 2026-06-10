@@ -129,7 +129,11 @@ function getASOPrincipal(col: Colaborador): { aso: ASO; vencimento: string } | n
 }
 
 function getStatusColaborador(col: Colaborador): StatusASO { const principal = getASOPrincipal(col); if (!principal) return 'sem_aso'; return getStatusASO(principal.vencimento) }
-function temProgramado(col: Colaborador): boolean { return col.asos.some(a => (a.programacoes || []).length > 0) }
+function temProgramado(col: Colaborador): boolean {
+  const principal = getASOPrincipal(col)
+  if (!principal) return false
+  return (principal.aso.programacoes || []).length > 0
+}
 function statusCores(s: StatusASO): { bg: string; text: string } { if (s === 'no_prazo') return { bg: '#dcfce7', text: '#15803d' }; if (s === 'critico') return { bg: '#fef9c3', text: '#a16207' }; if (s === 'atencao') return { bg: '#ffedd5', text: '#c2410c' }; if (s === 'vencido') return { bg: '#fee2e2', text: '#dc2626' }; return { bg: '#f1f5f9', text: '#64748b' } }
 function statusLabel(s: StatusASO): string { if (s === 'no_prazo') return 'No Prazo'; if (s === 'critico') return 'Prazo Crítico'; if (s === 'atencao') return 'Bernhoeft c/ Atenção'; if (s === 'vencido') return 'Vencido'; return 'Sem ASO' }
 

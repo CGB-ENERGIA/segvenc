@@ -4,6 +4,7 @@ import { useEffect, useState, useRef, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/lib/auth-context'
+import { uploadParaR2 } from '@/lib/r2-client'
 
 // ─── CONSTANTES ───────────────────────────────────────────────────────────────
 const COR = '#9f183c'
@@ -97,10 +98,13 @@ async function visualizarDocumento(e: React.MouseEvent, urlOuKey: string) {
       const parts = key.split('documentos/')
       if (parts.length > 1) key = parts[1]
     }
-    const res = await fetch(`/api/r2/signed-url?key=${encodeURIComponent(key)}`)
-    const data = await res.json()
-    if (data.url) window.open(data.url, '_blank')
-    else alert('Erro ao gerar link de visualização.')
+    const { data: { session } } = await supabase.auth.getSession()
+const res = await fetch(`/api/r2/signed-url?key=${encodeURIComponent(key)}`, {
+  headers: { Authorization: `Bearer ${session?.access_token ?? ''}` },
+})
+const data = await res.json()
+if (data.url) window.open(data.url, '_blank')
+else alert(data.error || 'Erro ao gerar link de visualização.')
   } catch (err) {
     console.error(err)
     alert('Erro ao abrir o documento.')
@@ -390,12 +394,7 @@ function ModalNovoExame({ colab, treinamentos, onClose, onUpdate, email, treinam
         const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19); const ext = arquivo.name.split('.').pop()
         const path = `${colab.matricula}/${form.regra_id}/${ts}.${ext}`
         
-        const formData = new FormData()
-        formData.append('file', arquivo)
-        formData.append('key', path)
-        
-        const res = await fetch('/api/r2/upload', { method: 'POST', body: formData })
-        if (!res.ok) throw new Error('Falha no upload do documento')
+        await uploadParaR2(arquivo, path)
         
         await supabase.from('registros_exames').update({ url_arquivo: path }).eq('id', novo.id)
       }
@@ -484,12 +483,7 @@ function ModalExame({ dados, abaInicial, onClose, onUpdate, email, podeAuditar, 
     const path = `${colab.matricula}/${treinamento.id}/${ts}.${ext}`;
     
     try {
-      const formData = new FormData();
-      formData.append('file', arquivo);
-      formData.append('key', path);
-      
-      const res = await fetch('/api/r2/upload', { method: 'POST', body: formData });
-      if (!res.ok) throw new Error('Falha no upload para o R2');
+      await uploadParaR2(arquivo, path)
       
       const { error: de } = await supabase.from('registros_exames').update({ url_arquivo: path }).eq('id', reg.id);
       if (de) throw de;
