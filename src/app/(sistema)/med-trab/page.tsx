@@ -40,6 +40,7 @@ interface ExameCompl { id: string; tipo_exame_id: number; nome_exame: string; da
 interface Colaborador {
   matricula: string; nome: string; situacao: string; funcao_id: number | null; gse: number | null
   data_admissao: string | null; processo: string | null
+  supervisor: string | null
   bases: { nome: string } | null; funcoes: { nome: string } | null; gerencias: { sigla: string } | null
   asos: ASO[]; exames_compl: ExameCompl[]
 }
@@ -711,6 +712,8 @@ export default function MedTrabPage() {
   const [filtroBase, setFiltroBase] = useState('')
   const [filtroSits, setFiltroSits] = useState<string[]>([])
   const [situacoesDisp, setSituacoesDisp] = useState<string[]>([])
+  const [filtroGer, setFiltroGer] = useState('')
+  const [filtroSup, setFiltroSup] = useState('')
   const [cardAtivo, setCardAtivo] = useState<CardFiltro>(null)
   const [compacto, setCompacto] = useState(false)
   const [expandido, setExpandido] = useState(false)
@@ -734,7 +737,7 @@ export default function MedTrabPage() {
     setLoading(true)
     let todos: any[] = []; let from = 0; const ps = 500
     while (true) {
-      let q = supabase.from('colaboradores').select(`matricula, nome, situacao, funcao_id, gse, data_admissao, processo, bases(nome), funcoes(nome), gerencias!colaboradores_gerencia_id_fkey(sigla)`).order('nome').range(from, from + ps - 1)
+      let q = supabase.from('colaboradores').select(`matricula, nome, situacao, funcao_id, gse, data_admissao, processo, supervisor, bases(nome), funcoes(nome), gerencias!colaboradores_gerencia_id_fkey(sigla)`).order('nome').range(from, from + ps - 1)
       if (filtroBase) q = q.eq('base_id', filtroBase)
       if (!primeiraVez) { if (sitsB.length > 0) q = q.in('situacao', sitsB); else q = q.eq('situacao', '___nenhuma___') }
       const { data: cd } = await q; if (!cd || cd.length === 0) break
@@ -778,6 +781,9 @@ export default function MedTrabPage() {
 
   useEffect(() => { if (situacoesDisp.length > 0) buscarColabs(filtroSits) }, [filtroBase, filtroSits])
 
+  const gerenciasDisp = useMemo(() => [...new Set(colabs.map(c => c.gerencias?.sigla).filter(Boolean) as string[])].sort(), [colabs])
+  const supervisoresDisp = useMemo(() => [...new Set(colabs.map(c => c.supervisor).filter(Boolean) as string[])].sort(), [colabs])
+
   const stats = useMemo(() => {
     const r = { no_prazo: 0, critico: 0, atencao: 0, vencido: 0, programado: 0 }
     colabs.forEach(c => { const s = getStatusColaborador(c); if (s === 'no_prazo') r.no_prazo++; else if (s === 'critico') r.critico++; else if (s === 'atencao') r.atencao++; else if (s === 'vencido') r.vencido++; if (temProgramado(c)) r.programado++ })
@@ -786,10 +792,12 @@ export default function MedTrabPage() {
 
   const filtrados = useMemo(() => colabs.filter(c => {
     if (busca) { const b = busca.toLowerCase(); if (!c.nome.toLowerCase().includes(b) && !c.matricula.includes(busca)) return false }
+    if (filtroGer && c.gerencias?.sigla !== filtroGer) return false
+    if (filtroSup && c.supervisor !== filtroSup) return false
     if (cardAtivo === 'programado') return temProgramado(c)
     if (cardAtivo) return getStatusColaborador(c) === cardAtivo
     return true
-  }), [colabs, busca, cardAtivo])
+  }), [colabs, busca, filtroGer, filtroSup, cardAtivo])
 
   const ordenados = useMemo(() => [...filtrados].sort((a, b) => {
     let vA: string | number = '', vB: string | number = ''
@@ -807,8 +815,8 @@ export default function MedTrabPage() {
   function toggleOrd(c: OrdemColuna) { if (ordCol === c) setOrdDir(d => d === 'asc' ? 'desc' : 'asc'); else { setOrdCol(c); setOrdDir('asc') } }
   const sitsIniciais = useMemo(() => situacoesDisp.filter(s => !SITUACOES_EXCLUIDAS_PADRAO.includes(s)), [situacoesDisp])
   const sitsAlteradas = JSON.stringify([...filtroSits].sort()) !== JSON.stringify([...sitsIniciais].sort())
-  const temFiltro = !!(busca || filtroBase || cardAtivo || sitsAlteradas)
-  function limpar() { setBusca(''); setFiltroBase(''); setCardAtivo(null); setFiltroSits(sitsIniciais) }
+  const temFiltro = !!(busca || filtroBase || filtroGer || filtroSup || cardAtivo || sitsAlteradas)
+  function limpar() { setBusca(''); setFiltroBase(''); setFiltroGer(''); setFiltroSup(''); setCardAtivo(null); setFiltroSits(sitsIniciais) }
 
   const sel: React.CSSProperties = { height: 36, border: '1px solid #e0e0e0', borderRadius: 8, padding: '0 10px', fontSize: 13, backgroundColor: 'white', color: '#555' }
   const padCell = compacto ? '4px 10px' : '8px 14px'; const fs = compacto ? 12 : 13
@@ -843,6 +851,12 @@ export default function MedTrabPage() {
         <input type="text" placeholder="Nome ou matrícula..." value={busca} onChange={e => setBusca(e.target.value)} style={{ ...sel, width: 200, padding: '0 12px' }} />
         <select value={filtroBase} onChange={e => setFiltroBase(e.target.value)} style={{ ...sel, width: 150 }}><option value="">Todas as bases</option>{bases.map(b => <option key={b.id} value={b.id}>{b.nome}</option>)}</select>
         <FiltroSituacao opcoes={situacoesDisp} selecionadas={filtroSits} onChange={setFiltroSits} />
+        <select value={filtroGer} onChange={e => setFiltroGer(e.target.value)} style={{ ...sel, width: 150 }}>
+          <option value="">Todas as gerências</option>{gerenciasDisp.map(g => <option key={g} value={g}>{g}</option>)}
+        </select>
+        <select value={filtroSup} onChange={e => setFiltroSup(e.target.value)} style={{ ...sel, width: 160 }}>
+          <option value="">Todos os coordenadores</option>{supervisoresDisp.map(s => <option key={s} value={s}>{s.split(' ')[0]}</option>)}
+        </select>
         <div style={{ flex: 1 }} />
         {temFiltro && <button onClick={limpar} style={{ height: 36, padding: '0 12px', fontSize: 12, border: '1px solid #fca5a5', borderRadius: 8, backgroundColor: '#fef2f2', color: '#dc2626', cursor: 'pointer' }}>✕ Limpar</button>}
         <button onClick={() => setExpandido(e => !e)} style={{ height: 36, padding: '0 12px', fontSize: 12, border: `1px solid ${expandido ? COR : '#e0e0e0'}`, borderRadius: 8, backgroundColor: expandido ? '#fdf2f5' : 'white', color: expandido ? COR : '#555', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}>{expandido ? '⊟ Recolher' : '⊞ Expandir colunas'}</button>
