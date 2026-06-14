@@ -143,11 +143,13 @@ function gerarExport(colabs: Colaborador[]) {
   return colabs.map(c => {
     const asoAdm = getASOPorTipo(c.asos, 'admissional'); const asoPer = getASOPorTipo(c.asos, 'periodico')
     const asoRet = getASOPorTipo(c.asos, 'retorno'); const asoMRO = getASOPorTipo(c.asos, 'mudanca_risco'); const asoDem = getASOPorTipo(c.asos, 'demissional')
-    const principal = getASOPrincipal(c); const status = getStatusColaborador(c); const dias = principal ? calcularDias(principal.vencimento) : null
+const principal = getASOPrincipal(c); const status = getStatusColaborador(c); const dias = principal ? calcularDias(principal.vencimento) : null
+    const prog = principal ? [...(principal.aso.programacoes || [])].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0] : null
     const row: Record<string, string | number> = {
       'Matrícula': c.matricula, 'Nome': c.nome, 'Base': c.bases?.nome || '', 'Situação': c.situacao,
       'Admissão': formatarData(c.data_admissao), 'Função': c.funcoes?.nome || '', 'Processo': c.processo || '', 'GSE': c.gse ?? '',
       'ASO': principal ? tipoSigla(principal.aso.tipo) : '—', 'Dias Restantes': dias ?? '', 'Status': statusLabel(status),
+      'Data Programada': prog?.data_programada ? formatarData(prog.data_programada) : '',
       'Admissional': formatarData(asoAdm?.data_realizacao), 'Periódico - Realização': formatarData(asoPer?.data_realizacao),
       'Periódico - Vencimento': formatarData(asoPer?.data_vencimento), 'Retorno': formatarData(asoRet?.data_realizacao),
       'MRO': formatarData(asoMRO?.data_realizacao), 'Demissional': formatarData(asoDem?.data_realizacao),
