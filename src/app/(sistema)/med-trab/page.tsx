@@ -8,7 +8,7 @@ import { useAuth } from '@/lib/auth-context'
 // ─── CONSTANTES ───────────────────────────────────────────────────────────────
 const COR = '#9f183c'
 const COL_MATRICULA = 110
-const COL_NOME = 230
+const COL_NOME = 300
 const SITUACOES_EXCLUIDAS_PADRAO = ['DEMITIDO', 'AF.PREVIDÊNCIA', 'LICENÇA MATERNIDADE']
 const TIPOS_SEM_VENCIMENTO = ['admissional', 'retorno', 'mudanca_risco', 'demissional']
 
@@ -902,8 +902,7 @@ export default function MedTrabPage() {
                       <td style={{ ...tdBase(), ...stickyTd(bg, 0), width: 110, minWidth: 110 }}>{c.matricula}</td>
                       <td style={{ ...tdBase(), ...stickyTd(bg, 110), width: COL_NOME, minWidth: COL_NOME }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                          <span style={{ fontWeight: 500, color: '#333', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: COL_NOME - 40 }}>{c.nome}</span>
-                          {podeEditar && <button title="Novo ASO" onClick={e => { e.stopPropagation(); setModalNovo(c) }} style={{ width: 20, height: 20, borderRadius: '50%', backgroundColor: '#f0f0f0', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, color: '#888', flexShrink: 0, lineHeight: 1 }} onMouseEnter={e => { e.currentTarget.style.backgroundColor = '#fdf2f5'; e.currentTarget.style.color = COR }} onMouseLeave={e => { e.currentTarget.style.backgroundColor = '#f0f0f0'; e.currentTarget.style.color = '#888' }}>+</button>}
+                        <span style={{ fontWeight: 500, color: '#333', whiteSpace: 'normal', wordBreak: 'break-word', lineHeight: 1.25, flex: 1, minWidth: 0 }}>{c.nome}</span>                          {podeEditar && <button title="Novo ASO" onClick={e => { e.stopPropagation(); setModalNovo(c) }} style={{ width: 20, height: 20, borderRadius: '50%', backgroundColor: '#f0f0f0', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, color: '#888', flexShrink: 0, lineHeight: 1 }} onMouseEnter={e => { e.currentTarget.style.backgroundColor = '#fdf2f5'; e.currentTarget.style.color = COR }} onMouseLeave={e => { e.currentTarget.style.backgroundColor = '#f0f0f0'; e.currentTarget.style.color = '#888' }}>+</button>}
                         </div>
                       </td>
                       <td style={tdBase()}>{c.bases?.nome || '—'}</td>
