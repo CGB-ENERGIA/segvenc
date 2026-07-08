@@ -57,10 +57,18 @@ function getStatusNR(dv: string): 'valido' | 'critico' | 'atencao' | 'vencido' {
   if (diff <= 60) return 'critico'
   return 'valido'
 }
-function getStatusPO(dv: string): 'valido' | 'proximo' | 'vencido' {
+function getStatusPO(dv: string | null): 'valido' | 'proximo' | 'vencido' {
+  if (!dv) return 'valido' // registro sem prazo definido = "Possui"
   const diff = (new Date(dv + 'T12:00:00').getTime() - new Date().getTime()) / 86400000
   return diff < 0 ? 'vencido' : diff <= 30 ? 'proximo' : 'valido'
 }
+// Regra PO: SIM sempre monitora; NÃO monitora se houver registro com prazo; N/A nunca.
+function isMonitoradoPO(campo: string, reg?: { data_vencimento: string | null }): boolean {
+  if (campo === 'SIM') return true
+  if (campo === 'NÃO' || campo === 'NAO') return !!(reg && reg.data_vencimento)
+  return false
+}
+
 function getStatusMed(dv: string | null): 'no_prazo' | 'critico' | 'atencao' | 'vencido' | 'sem_aso' {
   if (!dv) return 'sem_aso'
   const dias = getDias(dv)
@@ -118,11 +126,11 @@ function calcStatsPO(colabs: ColabPO[], pos: { id: number; nome: string; validad
   let v = 0, p = 0, vc = 0, prog = 0
   colabs.forEach(c => {
     pos.forEach(po => {
-      const campo = po.nome === 'Direção Defensiva' ? c.direcao : c.pilotagem
-      if (campo !== 'SIM') return
+const campo = po.nome === 'Direção Defensiva' ? c.direcao : c.pilotagem
       const reg = c.registros[po.id]
+      if (!isMonitoradoPO(campo, reg)) return
       if (!reg) { vc++; return }
-      const s = getStatusPO(reg.data_vencimento!)
+      const s = getStatusPO(reg.data_vencimento)
       if (s === 'valido') v++; else if (s === 'proximo') p++; else vc++
       if ((s === 'proximo' || s === 'vencido') && reg.programacoes.some(d => d >= hoje)) prog++
     })
@@ -204,9 +212,9 @@ function contarPOPorGrupo(colabs: ColabPO[], pos: { id: number; nome: string }[]
     const chave = agrup === 'base' ? c.base : agrup === 'gerencia' ? c.gerencia : c.supervisor
     if (!chave) return
     pos.forEach(po => {
-      const campo = po.nome === 'Direção Defensiva' ? c.direcao : c.pilotagem
-      if (campo !== 'SIM') return
+const campo = po.nome === 'Direção Defensiva' ? c.direcao : c.pilotagem
       const reg = c.registros[po.id]
+      if (!isMonitoradoPO(campo, reg)) return
       if (situacao === 'programado') {
         if (!reg) return; const s = getStatusPO(reg.data_vencimento!)
         if (!((s === 'proximo' || s === 'vencido') && reg.programacoes.some(d => d >= hoje))) return
@@ -614,8 +622,8 @@ function TabelaPO({ colabs, pos, situacao, filtroAtivo }: { colabs: ColabPO[]; p
     filtrados.forEach(c => {
       pos.forEach(po => {
         const campo = po.nome === 'Direção Defensiva' ? c.direcao : c.pilotagem
-        if (campo !== 'SIM') return
         const reg = c.registros[po.id]
+        if (!isMonitoradoPO(campo, reg)) return
         let incluir = false
         if (situacao === 'programado') { if (reg) { const s = getStatusPO(reg.data_vencimento!); incluir = (s === 'proximo' || s === 'vencido') && reg.programacoes.some(d => d >= hoje) } }
         else if (situacao === 'proximo') { if (reg) incluir = getStatusPO(reg.data_vencimento!) === 'proximo' }
@@ -896,7 +904,7 @@ export default function DashboardPage() {
 
       const { data: regras } = await supabase.from('regras_vencimento').select('id, nome_item, validade_dias')
       const nrs = (regras || []).filter(r => NRS_ALVO.includes(r.nome_item)).map(r => ({ id: r.id, nome: r.nome_item, validade_dias: r.validade_dias }))
-      const pos = (regras || []).filter(r => POS_ALVO.includes(r.nome_item)).map(r => ({ id: r.id, nome: r.nome_item, validade_dias: r.validade_dias || 730 }))
+      const pos = (regras || []).filter(r => POS_ALVO.includes(r.nome_item)).map(r => ({ id: r.id, nome: r.nome_item, validade_dias: r.validade_dias }))
       setNrsData(nrs); setPosData(pos)
 
       const { data: matrizData } = await supabase.from('matriz_treinamentos').select('funcao, processo, treinamento, obrigatorio').eq('pagina', 'BASE NR')
@@ -938,7 +946,7 @@ export default function DashboardPage() {
       }
       const regsPOMap: Record<string, Record<number, any>> = {}
       if (mats.length > 0) await buscarRegistrosEmLotes(mats, pos.map(p => p.id), regsPOMap)
-      setColabsPO(mats.map((mat: string) => { const mpo = matrizPOMap[mat] || { direcao: 'N/A', pilotagem: 'N/A' }; return { matricula: mat, ...colabInfo[mat], direcao: mpo.direcao, pilotagem: mpo.pilotagem, registros: regsPOMap[mat] || {} } }).filter((c: ColabPO) => c.direcao === 'SIM' || c.pilotagem === 'SIM'))
+      setColabsPO(mats.map((mat: string) => { const mpo = matrizPOMap[mat] || { direcao: 'N/A', pilotagem: 'N/A' }; return { matricula: mat, ...colabInfo[mat], direcao: mpo.direcao, pilotagem: mpo.pilotagem, registros: regsPOMap[mat] || {} } }).filter((c: ColabPO) => pos.some(po => { const campo = po.nome === 'Direção Defensiva' ? c.direcao : c.pilotagem; return isMonitoradoPO(campo, c.registros[po.id]) })))
 
       // Medicina do Trabalho
       const asosPorColab: Record<string, any[]> = {}
