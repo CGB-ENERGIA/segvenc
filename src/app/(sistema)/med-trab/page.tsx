@@ -399,7 +399,7 @@ const abas: { key: AbaModal; label: string }[] = [
                 </div>
               )}
               {aso.observacao && <div style={{ backgroundColor: '#f9f9f9', borderRadius: 8, padding: 12, marginBottom: 16 }}><p style={{ fontSize: 11, color: '#888', margin: '0 0 4px' }}>Observação</p><p style={{ fontSize: 13, color: '#555', margin: 0 }}>{aso.observacao}</p></div>}
-              {nivel === 'admin' && <div style={{ marginTop: 16, paddingTop: 16, borderTop: '1px solid #f0f0f0' }}><button onClick={() => { setConfNome(''); setErrExc(''); setModalExc(true) }} style={{ height: 36, padding: '0 16px', fontSize: 12, border: '1px solid #fca5a5', borderRadius: 8, backgroundColor: '#fef2f2', color: '#dc2626', cursor: 'pointer' }}>🗑 Excluir este ASO</button></div>}
+              {(nivel === 'admin' || nivel === 'operador') && <div style={{ marginTop: 16, paddingTop: 16, borderTop: '1px solid #f0f0f0' }}><button onClick={() => { setConfNome(''); setErrExc(''); setModalExc(true) }} style={{ height: 36, padding: '0 16px', fontSize: 12, border: '1px solid #fca5a5', borderRadius: 8, backgroundColor: '#fef2f2', color: '#dc2626', cursor: 'pointer' }}>🗑 Excluir este ASO</button></div>}
             </>
           ) : (
             <div style={{ textAlign: 'center', padding: '40px 0', color: '#aaa' }}><p style={{ fontSize: 32, margin: '0 0 8px' }}>📋</p><p style={{ fontSize: 14 }}>Nenhum registro de {tLabel} encontrado.</p></div>
