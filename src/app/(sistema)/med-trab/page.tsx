@@ -57,6 +57,12 @@ function formatarData(d: string | null | undefined): string { if (!d) return '�
 function calcularDias(dv: string | null): number | null { if (!dv) return null; return Math.ceil((new Date(dv + 'T12:00:00').getTime() - new Date().getTime()) / 86400000) }
 function getStatusASO(dv: string | null): StatusASO { const dias = calcularDias(dv); if (dias === null) return 'sem_aso'; if (dias < 0) return 'vencido'; if (dias <= 30) return 'atencao'; if (dias <= 60) return 'critico'; return 'no_prazo' }
 function getASOPorTipo(asos: ASO[], tipo: string): ASO | null { const lista = (asos || []).filter(a => a.tipo === tipo); if (!lista.length) return null; return lista.sort((a, b) => new Date(b.data_realizacao).getTime() - new Date(a.data_realizacao).getTime())[0] }
+function getExamesPorTipo(exames: ExameCompl[], nomeExame: string): ExameCompl[] {
+  return (exames || []).filter(e => e.nome_exame === nomeExame).sort((a, b) => new Date(b.data_realizacao).getTime() - new Date(a.data_realizacao).getTime())
+}
+function getExameMaisRecente(exames: ExameCompl[], nomeExame: string): ExameCompl | undefined {
+  return getExamesPorTipo(exames, nomeExame)[0]
+}
 function tipoLabel(tipo: string): string { return TIPOS_ASO.find(t => t.value === tipo)?.label ?? tipo }
 function tipoSigla(tipo: string): string { return TIPOS_ASO.find(t => t.value === tipo)?.sigla ?? tipo.toUpperCase().slice(0, 3) }
 
@@ -154,7 +160,7 @@ const principal = getASOPrincipal(c); const status = getStatusColaborador(c); co
       'Periódico - Vencimento': formatarData(asoPer?.data_vencimento), 'Retorno': formatarData(asoRet?.data_realizacao),
       'MRO': formatarData(asoMRO?.data_realizacao), 'Demissional': formatarData(asoDem?.data_realizacao),
     }
-    EXAMES_COMPL.forEach(e => { const ex = c.exames_compl.find(x => x.nome_exame === e.nome); row[e.label] = formatarData(ex?.data_realizacao) })
+    EXAMES_COMPL.forEach(e => { const ex = getExameMaisRecente(c.exames_compl, e.nome); row[e.label] = formatarData(ex?.data_realizacao) })
     return row
   })
 }
@@ -521,50 +527,80 @@ const abas: { key: AbaModal; label: string }[] = [
 
 // ─── MODAL EXAME COMPLEMENTAR ─────────────────────────────────────────────────
 function ModalExameCompl({ colab, nomeExame, exame, onClose, onUpdate }: { colab: Colaborador; nomeExame: string; exame: ExameCompl | undefined; onClose: () => void; onUpdate: () => void }) {
-  const [dataRealizacao, setDataRealizacao] = useState(exame?.data_realizacao || '')
-  const [arquivo, setArquivo] = useState<File | null>(null); const [salvando, setSalvando] = useState(false); const [erro, setErro] = useState('')
+  const [dataRealizacao, setDataRealizacao] = useState('')
+  const [arquivo, setArquivo] = useState<File | null>(null)
+  const [salvando, setSalvando] = useState(false)
+  const [erro, setErro] = useState('')
+  const [historico, setHistorico] = useState<ExameCompl[]>([])
+  const [loadHistorico, setLoadHistorico] = useState(true)
   const fileRef = useRef<HTMLInputElement>(null)
   const inp: React.CSSProperties = { width: '100%', height: 38, border: '1px solid #e0e0e0', borderRadius: 8, padding: '0 12px', fontSize: 13, boxSizing: 'border-box', outline: 'none', backgroundColor: 'white' }
-  
-  // Upload modificado para usar o Cloudflare R2
+
+  useEffect(() => { carregarHistorico() }, [])
+
+  async function carregarHistorico() {
+    setLoadHistorico(true)
+    const { data: tipo } = await supabase.from('tipos_exame_medico').select('id').eq('nome', nomeExame).single()
+    if (!tipo) { setHistorico([]); setLoadHistorico(false); return }
+    const { data } = await supabase
+      .from('exames_aso')
+      .select('id, tipo_exame_id, data_realizacao, url_arquivo')
+      .eq('matricula_colaborador', colab.matricula)
+      .eq('tipo_exame_id', tipo.id)
+      .order('data_realizacao', { ascending: false })
+    setHistorico((data || []).map((e: any) => ({ id: e.id, tipo_exame_id: e.tipo_exame_id, nome_exame: nomeExame, data_realizacao: e.data_realizacao, url_arquivo: e.url_arquivo })))
+    setLoadHistorico(false)
+  }
+
   async function salvar() {
     if (!dataRealizacao) { setErro('Data de realização é obrigatória.'); return }
     setSalvando(true); setErro('')
     try {
-      let urlArquivo: string | null = exame?.url_arquivo || null
-      
-      if (arquivo) { 
-        const ext = arquivo.name.split('.').pop(); 
-        const path = `exames_compl/${colab.matricula}/${nomeExame.replace(/\s/g, '_')}/${Date.now()}.${ext}`; 
-        
-        await uploadParaR2(arquivo, path);
-        
-        urlArquivo = path;
+      let urlArquivo: string | null = null
+      if (arquivo) {
+        const ext = arquivo.name.split('.').pop()
+        const path = `exames_compl/${colab.matricula}/${nomeExame.replace(/\s/g, '_')}/${Date.now()}.${ext}`
+        await uploadParaR2(arquivo, path)
+        urlArquivo = path
       }
-      
       const { data: tipo } = await supabase.from('tipos_exame_medico').select('id').eq('nome', nomeExame).single()
       if (!tipo) throw new Error('Tipo de exame não encontrado')
-      if (exame) { await supabase.from('exames_aso').update({ data_realizacao: dataRealizacao, url_arquivo: urlArquivo }).eq('id', exame.id) }
-      else { await supabase.from('exames_aso').insert({ matricula_colaborador: colab.matricula, tipo_exame_id: tipo.id, data_realizacao: dataRealizacao, url_arquivo: urlArquivo }) }
+      await supabase.from('exames_aso').insert({ matricula_colaborador: colab.matricula, tipo_exame_id: tipo.id, data_realizacao: dataRealizacao, url_arquivo: urlArquivo })
       onUpdate(); onClose()
     } catch (e: any) { setErro(e.message || 'Erro ao salvar') }
     setSalvando(false)
   }
-  
+
+  const maisRecente = historico[0]
+  const anteriores = historico.slice(1)
+
   return (
     <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 300 }}>
-      <div style={{ backgroundColor: 'white', borderRadius: 16, padding: 28, width: '100%', maxWidth: 420, boxShadow: '0 20px 60px rgba(0,0,0,0.2)' }}>
+      <div style={{ backgroundColor: 'white', borderRadius: 16, padding: 28, width: '100%', maxWidth: 460, maxHeight: '88vh', overflowY: 'auto', boxShadow: '0 20px 60px rgba(0,0,0,0.2)' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 }}>
           <div><h2 style={{ fontSize: 16, fontWeight: 600, color: '#1a1a1a', margin: 0 }}>{nomeExame}</h2><p style={{ fontSize: 13, color: '#888', margin: '3px 0 0' }}>{colab.nome} · {colab.matricula}</p></div>
           <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: '#aaa' }}>✕</button>
         </div>
+
+        {loadHistorico
+          ? <div style={{ marginBottom: 20 }}><p style={{ fontSize: 12, color: '#aaa' }}>Carregando registro atual...</p></div>
+          : maisRecente && (
+            <div style={{ backgroundColor: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 10, padding: 12, marginBottom: 20 }}>
+              <p style={{ fontSize: 11, color: '#16a34a', margin: '0 0 4px', fontWeight: 600 }}>Registro mais recente</p>
+              <p style={{ fontSize: 13, color: '#333', margin: '0 0 6px' }}>{formatarData(maisRecente.data_realizacao)}</p>
+              {maisRecente.url_arquivo
+                ? <a href="#" onClick={(e) => visualizarDocumento(e, maisRecente.url_arquivo!)} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#2563eb', textDecoration: 'none' }}><Icone tipo="olho" cor="#2563eb" size={13} />Ver documento</a>
+                : <span style={{ fontSize: 12, color: '#aaa' }}>Sem documento anexado</span>}
+            </div>
+          )}
+
+        <p style={{ fontSize: 13, fontWeight: 600, color: '#333', margin: '0 0 12px' }}>Novo registro</p>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
           <div><label style={{ fontSize: 12, color: '#666', display: 'block', marginBottom: 4 }}>Data de realização *</label><input type="date" value={dataRealizacao} onChange={e => setDataRealizacao(e.target.value)} style={inp} /></div>
           <div>
             <label style={{ fontSize: 12, color: '#666', display: 'block', marginBottom: 4 }}>Documento <span style={{ color: '#aaa' }}>(opcional)</span></label>
-            {exame?.url_arquivo && <a href="#" onClick={(e) => visualizarDocumento(e, exame.url_arquivo!)} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', backgroundColor: '#eff6ff', borderRadius: 8, color: '#2563eb', textDecoration: 'none', fontSize: 12, marginBottom: 8 }}><Icone tipo="olho" cor="#2563eb" size={14} />Ver documento atual</a>}
             <div onClick={() => fileRef.current?.click()} style={{ border: '2px dashed #e0e0e0', borderRadius: 10, padding: '16px 20px', textAlign: 'center', cursor: 'pointer', backgroundColor: '#fafafa' }}>
-              <Icone tipo="upload" cor="#aaa" size={20} /><p style={{ fontSize: 12, color: '#888', margin: '6px 0 0' }}>{arquivo ? arquivo.name : exame?.url_arquivo ? 'Substituir documento' : 'Clique para anexar'}</p>
+              <Icone tipo="upload" cor="#aaa" size={20} /><p style={{ fontSize: 12, color: '#888', margin: '6px 0 0' }}>{arquivo ? arquivo.name : 'Clique para anexar'}</p>
               <input ref={fileRef} type="file" accept=".pdf,.jpg,.jpeg,.png" style={{ display: 'none' }} onChange={e => setArquivo(e.target.files?.[0] || null)} />
             </div>
           </div>
@@ -574,13 +610,30 @@ function ModalExameCompl({ colab, nomeExame, exame, onClose, onUpdate }: { colab
             <button onClick={salvar} disabled={salvando} style={{ height: 38, padding: '0 22px', backgroundColor: COR, color: 'white', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 500, cursor: salvando ? 'not-allowed' : 'pointer', opacity: salvando ? 0.7 : 1 }}>{salvando ? 'Salvando...' : 'Salvar'}</button>
           </div>
         </div>
+
+        <div style={{ marginTop: 24, paddingTop: 16, borderTop: '1px solid #f0f0f0' }}>
+          <p style={{ fontSize: 13, fontWeight: 600, color: '#333', margin: '0 0 12px' }}>Histórico anterior</p>
+          {loadHistorico
+            ? <p style={{ fontSize: 13, color: '#aaa' }}>Carregando...</p>
+            : anteriores.length === 0
+              ? <p style={{ fontSize: 13, color: '#aaa' }}>Nenhum registro anterior.</p>
+              : anteriores.map(h => (
+                <div key={h.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', border: '1px solid #f0f0f0', borderRadius: 8, padding: '8px 12px', marginBottom: 8 }}>
+                  <span style={{ fontSize: 12, color: '#666' }}>{formatarData(h.data_realizacao)}</span>
+                  {h.url_arquivo
+                    ? <a href="#" onClick={(e) => visualizarDocumento(e, h.url_arquivo!)} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, color: '#2563eb', textDecoration: 'none' }}><Icone tipo="olho" cor="#2563eb" size={12} />Ver</a>
+                    : <span style={{ fontSize: 11, color: '#ccc' }}>Sem documento</span>}
+                </div>
+              ))
+          }
+        </div>
       </div>
     </div>
   )
 }
 
 // ─── MODAL NOVO ASO ───────────────────────────────────────────────────────────
-interface ExameSugerido { tipo_exame_id: number; nome: string; data: string; marcado: boolean; ultimaData: string | null }
+interface ExameSugerido { tipo_exame_id: number; nome: string; data: string; marcado: boolean; ultimaData: string | null; dataEditada?: boolean }
 
 function ModalNovoASO({ colab, onClose, onSalvo }: { colab: Colaborador; onClose: () => void; onSalvo: () => void }) {
   const [tipo, setTipo] = useState('periodico')
@@ -597,7 +650,6 @@ function ModalNovoASO({ colab, onClose, onSalvo }: { colab: Colaborador; onClose
   const fileRef = useRef<HTMLInputElement>(null)
   const CAMPO_TIPO: Record<string, string> = { admissional: 'no_adm', periodico: 'no_per', retorno: 'no_ret', mudanca_risco: 'no_mro', demissional: 'no_dem' }
 
-  useEffect(() => { if (tipo !== 'periodico' || vencimentoEditado) return; if (!dataRealizacao) { setDataVencimento(''); return }; const d = new Date(dataRealizacao + 'T12:00:00'); d.setFullYear(d.getFullYear() + 1); setDataVencimento(d.toISOString().split('T')[0]) }, [tipo, dataRealizacao, vencimentoEditado])
   useEffect(() => { setDataVencimento(''); setVencimentoEditado(false) }, [tipo])
   useEffect(() => { supabase.from('tipos_exame_medico').select('id, nome').order('nome').then(({ data }) => setTodosExames(data || [])) }, [])
   useEffect(() => {
@@ -613,10 +665,35 @@ function ModalNovoASO({ colab, onClose, onSalvo }: { colab: Colaborador; onClose
     }
     buscarExames()
   }, [tipo, colab.gse])
-  useEffect(() => { if (!dataRealizacao) return; setExamesSugeridos(prev => prev.map(e => ({ ...e, data: e.data || dataRealizacao }))) }, [dataRealizacao])
+  // CORREÇÃO (v2): a versão anterior usava useEffect + debounce por tempo, mas um valor
+  // intermediário de 10 caracteres (ainda incompleto/inválido, ex: "0202-07-20") podia passar
+  // pela checagem de comprimento e ficar "travado" nos exames complementares — porque o código
+  // só preenche a data do exame se ainda estiver vazia (`e.data || dataRealizacao`), então uma
+  // vez que um valor errado entrava ali, o valor certo (digitado depois) nunca mais substituía.
+  // Agora o cálculo do vencimento e o preenchimento das datas dos exames só rodam no onBlur do
+  // campo "Data de realização" (quando o usuário termina de digitar e sai do campo), com uma
+  // validação de formato de data plausível (ano começando em 19 ou 20) antes de aceitar.
+  function dataCompletaValida(v: string): boolean {
+    return /^(19|20)\d{2}-\d{2}-\d{2}$/.test(v)
+  }
+
+  function aoMudarDataRealizacao(v: string) {
+    setDataRealizacao(v)
+    if (!v && tipo === 'periodico' && !vencimentoEditado) setDataVencimento('')
+  }
+
+  function aoSairDataRealizacao() {
+    if (!dataCompletaValida(dataRealizacao)) return
+    if (tipo === 'periodico' && !vencimentoEditado) {
+      const d = new Date(dataRealizacao + 'T12:00:00')
+      d.setFullYear(d.getFullYear() + 1)
+      setDataVencimento(d.toISOString().split('T')[0])
+    }
+    setExamesSugeridos(prev => prev.map(e => e.dataEditada ? e : { ...e, data: dataRealizacao }))
+  }
 
   function toggleExame(idx: number) { setExamesSugeridos(prev => prev.map((e, i) => i === idx ? { ...e, marcado: !e.marcado } : e)) }
-  function setDataExame(idx: number, data: string) { setExamesSugeridos(prev => prev.map((e, i) => i === idx ? { ...e, data } : e)) }
+  function setDataExame(idx: number, data: string) { setExamesSugeridos(prev => prev.map((e, i) => i === idx ? { ...e, data, dataEditada: true } : e)) }
   function adicionarExtra() { if (!exameExtra) return; const te = todosExames.find(t => t.id === parseInt(exameExtra)); if (!te || examesSugeridos.find(e => e.tipo_exame_id === te.id)) return; setExamesSugeridos(prev => [...prev, { tipo_exame_id: te.id, nome: te.nome, data: dataRealizacao || '', marcado: true, ultimaData: null }]); setExameExtra('') }
   function removerExtra(idx: number) { setExamesSugeridos(prev => prev.filter((_, i) => i !== idx)) }
 
@@ -659,7 +736,7 @@ function ModalNovoASO({ colab, onClose, onSalvo }: { colab: Colaborador; onClose
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
           <div><label style={{ fontSize: 12, color: '#666', display: 'block', marginBottom: 4 }}>Tipo *</label><select value={tipo} onChange={e => setTipo(e.target.value)} style={inp}>{TIPOS_ASO.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}</select></div>
           <div style={{ display: 'grid', gridTemplateColumns: semVencimento ? '1fr' : '1fr 1fr', gap: 12 }}>
-            <div><label style={{ fontSize: 12, color: '#666', display: 'block', marginBottom: 4 }}>Data de realização *</label><input type="date" value={dataRealizacao} onChange={e => setDataRealizacao(e.target.value)} style={inp} /></div>
+            <div><label style={{ fontSize: 12, color: '#666', display: 'block', marginBottom: 4 }}>Data de realização *</label><input type="date" value={dataRealizacao} onChange={e => aoMudarDataRealizacao(e.target.value)} onBlur={aoSairDataRealizacao} style={inp} /></div>
             {!semVencimento && <div><label style={{ fontSize: 12, color: '#666', display: 'block', marginBottom: 4 }}>{tipo === 'periodico' ? 'Vencimento (auto +1 ano)' : 'Vencimento'}</label><input type="date" value={dataVencimento} onChange={e => { setDataVencimento(e.target.value); setVencimentoEditado(true) }} style={{ ...inp, backgroundColor: dataVencimento ? '#f0fdf4' : 'white' }} />{dataVencimento && <p style={{ fontSize: 11, color: '#16a34a', margin: '3px 0 0' }}>✓ Calculado automaticamente</p>}</div>}
           </div>
           {semVencimento && <div style={{ backgroundColor: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 8, padding: '8px 12px' }}><p style={{ fontSize: 12, color: '#16a34a', margin: 0 }}>✓ Este tipo de ASO não possui prazo de vencimento</p></div>}
@@ -768,7 +845,7 @@ export default function MedTrabPage() {
       for (let i = 0; i < mats.length; i += LOTE) {
         const lote = mats.slice(i, i + LOTE); let fromE = 0
         while (true) {
-          const { data: eData } = await supabase.from('exames_aso').select(`id, matricula_colaborador, tipo_exame_id, data_realizacao, url_arquivo, tipos_exame_medico(nome)`).in('matricula_colaborador', lote).range(fromE, fromE + 499)
+          const { data: eData } = await supabase.from('exames_aso').select(`id, matricula_colaborador, tipo_exame_id, data_realizacao, url_arquivo, tipos_exame_medico(nome)`).in('matricula_colaborador', lote).order('data_realizacao', { ascending: false }).range(fromE, fromE + 499)
           if (!eData || eData.length === 0) break; examesData = [...examesData, ...eData]; if (eData.length < 500) break; fromE += 500
         }
       }
@@ -921,7 +998,7 @@ export default function MedTrabPage() {
                         <CelulaASODetalhe aso={asoRet} tipo="retorno" compacto={compacto} isMaisRecente={principal?.aso === asoRet} onClick={() => setModalASO({ colab: c, aso: asoRet, tipo: 'retorno', abaInicial: 'info' })} onCalendario={() => { if (podeEditar) setModalASO({ colab: c, aso: asoRet, tipo: 'retorno', abaInicial: 'programacao' }) }} />
                         <CelulaASODetalhe aso={asoMRO} tipo="mudanca_risco" compacto={compacto} isMaisRecente={principal?.aso === asoMRO} onClick={() => setModalASO({ colab: c, aso: asoMRO, tipo: 'mudanca_risco', abaInicial: 'info' })} onCalendario={() => { if (podeEditar) setModalASO({ colab: c, aso: asoMRO, tipo: 'mudanca_risco', abaInicial: 'programacao' }) }} />
                         <CelulaASODetalhe aso={asoDem} tipo="demissional" compacto={compacto} isMaisRecente={principal?.aso === asoDem} onClick={() => setModalASO({ colab: c, aso: asoDem, tipo: 'demissional', abaInicial: 'info' })} onCalendario={() => { if (podeEditar) setModalASO({ colab: c, aso: asoDem, tipo: 'demissional', abaInicial: 'programacao' }) }} />
-                        {EXAMES_COMPL.map(e => { const exame = c.exames_compl.find(x => x.nome_exame === e.nome); return <CelulaExameCompl key={e.key} exame={exame} compacto={compacto} onClick={() => { if (podeEditar) setModalExameCompl({ colab: c, nomeExame: e.nome, exame }) }} /> })}
+                        {EXAMES_COMPL.map(e => { const exame = getExameMaisRecente(c.exames_compl, e.nome); return <CelulaExameCompl key={e.key} exame={exame} compacto={compacto} onClick={() => { if (podeEditar) setModalExameCompl({ colab: c, nomeExame: e.nome, exame }) }} /> })}
                       </>}
                     </tr>
                   )
