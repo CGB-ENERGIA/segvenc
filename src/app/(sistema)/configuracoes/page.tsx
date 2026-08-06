@@ -35,7 +35,7 @@ const MODULOS = [
   { chave: 'gerar_aso', label: 'Gerar ASO' },
   { chave: 'configuracoes', label: 'Configurações' },
 ]
-const NRS_ALVO = ['NR 10-B', 'NR 11', 'NR 12 - II', 'NR 12 - V', 'NR 12 - XII', 'NR 35']
+const NRS_ALVO = ['NR 10-B', 'NR 11', 'NR 12 - II', 'NR 12 - V', 'NR 12 - XII','NR 20', 'NR 35']
 
 // ─── ESTILOS BASE ─────────────────────────────────────────────────────────────
 const cor = '#9f183c'
