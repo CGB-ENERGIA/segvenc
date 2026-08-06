@@ -8,9 +8,11 @@ import { uploadParaR2 } from '@/lib/r2-client'
 
 // ─── CONSTANTES ───────────────────────────────────────────────────────────────
 const COR = '#9f183c'
-const NRS_ALVO = ['NR 10-B', 'NR 11', 'NR 12 - II', 'NR 12 - V', 'NR 12 - XII', 'NR 35']
+const NRS_ALVO = ['NR 10-B', 'NR 11', 'NR 12 - II', 'NR 12 - V', 'NR 12 - XII', 'NR 20', 'NR 35']
 const COL_MATRICULA = 110
 const COL_NOME = 230
+const COL_FUNCAO = 170
+const COL_PROCESSO = 120
 // Situações excluídas por padrão ao abrir a página
 const SITUACOES_EXCLUIDAS_PADRAO = ['DEMITIDO', 'AF.PREVIDÊNCIA', 'LICENÇA MATERNIDADE']
 
@@ -1054,8 +1056,8 @@ export default function BaseNRPage() {
             <tr style={{ backgroundColor: '#fafafa' }}>
               {vis('matricula') && <Th label="Matrícula" col="matricula" ord={ordCol} dir={ordDir} onClick={toggleOrd} left={0} style={{ width: COL_MATRICULA, minWidth: COL_MATRICULA }} />}
               {vis('nome') && <Th label="Nome" col="nome" ord={ordCol} dir={ordDir} onClick={toggleOrd} left={leftNome} style={{ width: COL_NOME, minWidth: COL_NOME }} />}
-              {vis('funcao') && <Th label="Função" col="funcao" ord={ordCol} dir={ordDir} onClick={toggleOrd} />}
-              {vis('processo') && <Th label="Processo" col="processo" ord={ordCol} dir={ordDir} onClick={toggleOrd} />}
+              {vis('funcao') && <Th label="Função" col="funcao" ord={ordCol} dir={ordDir} onClick={toggleOrd} style={{ width: COL_FUNCAO }} />}
+              {vis('processo') && <Th label="Processo" col="processo" ord={ordCol} dir={ordDir} onClick={toggleOrd} style={{ width: COL_PROCESSO }} />} 
               {vis('base') && <Th label="Base" col="base" ord={ordCol} dir={ordDir} onClick={toggleOrd} />}
               {vis('admissao') && <Th label="Admissão" col="admissao" ord={ordCol} dir={ordDir} onClick={toggleOrd} />}
               {vis('situacao') && <Th label="Situação" col="situacao" ord={ordCol} dir={ordDir} onClick={toggleOrd} />}
@@ -1084,8 +1086,8 @@ export default function BaseNRPage() {
                         )}
                       </div>
                     </td>}
-                    {vis('funcao') && <td style={tdBase()}>{c.funcoes?.nome || '—'}</td>}
-                    {vis('processo') && <td style={tdBase()}>{c.processo || '—'}</td>}
+                    {vis('funcao') && <td style={tdBase()} title={c.funcoes?.nome || ''}><div style={{ width: COL_FUNCAO, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.funcoes?.nome || '—'}</div></td>}
+                    {vis('processo') && <td style={tdBase()} title={c.processo || ''}><div style={{ width: COL_PROCESSO, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.processo || '—'}</div></td>}
                     {vis('base') && <td style={tdBase()}>{c.bases?.nome || '—'}</td>}
                     {vis('admissao') && <td style={tdBase()}>{formatarData(c.data_admissao)}</td>}
                     {vis('situacao') && <td style={tdBase()}><span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 99, backgroundColor: c.situacao === 'ATIVO' ? '#f0fdf4' : '#fef2f2', color: c.situacao === 'ATIVO' ? '#16a34a' : '#dc2626' }}>{c.situacao}</span></td>}

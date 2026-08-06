@@ -15,7 +15,7 @@ const CORES_STATUS = {
 }
 const hoje = new Date().toISOString().split('T')[0]
 const SITUACOES_EXCLUIDAS_PADRAO = ['DEMITIDO', 'AF.PREVIDÊNCIA', 'LICENÇA MATERNIDADE']
-const NRS_ALVO = ['NR 10-B', 'NR 11', 'NR 12 - II', 'NR 12 - V', 'NR 12 - XII', 'NR 35']
+const NRS_ALVO = ['NR 10-B', 'NR 11', 'NR 12 - II', 'NR 12 - V', 'NR 12 - XII', 'NR 20', 'NR 35']
 const POS_ALVO = ['Direção Defensiva', 'Pilotagem Defensiva']
 const LOTE = 100
 
