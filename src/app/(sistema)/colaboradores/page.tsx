@@ -400,143 +400,293 @@ function toggleOrdem(coluna: OrdemColuna) {
       const rows: any[] = X.utils.sheet_to_json(ws, { defval: '' })
       const logs: string[] = []
 
-      // Carregar mapeamento de Base (Seção)
-      const { data: mapaSecao } = await supabase.from('secao_base_map').select('secao_texto, base_nome')
-      const secaoMap: Record<string, string> = {}
-      ;(mapaSecao || []).forEach((m: any) => { secaoMap[m.secao_texto.trim().toUpperCase()] = m.base_nome })
+      if (rows.length === 0) { setImportErro('Planilha vazia — nenhuma linha encontrada.'); setImportProcessando(false); return }
 
-      // Agrupar por CHAPA
-      const groupedByChapa: Record<string, any[]> = {}
+      // ── Detecção de formato pelo cabeçalho ──
+      const header = Object.keys(rows[0])
+      const isTOTVS = header.includes('CHAPA')
+      const isExport = !isTOTVS && header.includes('Matrícula')
+      if (!isTOTVS && !isExport) {
+        setImportErro('Planilha não reconhecida. Use o arquivo do TOTVS (coluna "CHAPA") ou o export do sistema (coluna "Matrícula").')
+        setImportProcessando(false); return
+      }
+      logs.push(isTOTVS ? 'Formato detectado: TOTVS' : 'Formato detectado: Export do sistema')
+
+      // Carregar mapeamento de Base (Seção) e Centro de Custo — só usados pelo TOTVS
+      const secaoMap: Record<string, string> = {}
+      const ccMap: Record<string, { processo: string | null; gerencia: string | null; coordenador: string | null }> = {}
+      if (isTOTVS) {
+        const { data: mapaSecao } = await supabase.from('secao_base_map').select('secao_texto, base_nome')
+        ;(mapaSecao || []).forEach((m: any) => { secaoMap[m.secao_texto.trim().toUpperCase()] = m.base_nome })
+
+        const { data: mapaCC } = await supabase.from('centro_custo_map').select('centro_custo, processo, gerencia, coordenador')
+        ;(mapaCC || []).forEach((m: any) => { ccMap[String(m.centro_custo).trim().toUpperCase()] = { processo: m.processo || null, gerencia: m.gerencia || null, coordenador: m.coordenador || null } })
+      }
+
+      // Agrupar por matrícula (CHAPA no TOTVS, Matrícula no export)
+      const matKey = isTOTVS ? 'CHAPA' : 'Matrícula'
+      const grouped: Record<string, any[]> = {}
       rows.forEach((r: any) => {
-        const mat = String(r['CHAPA'] || '').trim()
+        const mat = String(r[matKey] || '').trim()
         if (!mat) return
-        if (!groupedByChapa[mat]) groupedByChapa[mat] = []
-        groupedByChapa[mat].push(r)
+        if (!grouped[mat]) grouped[mat] = []
+        grouped[mat].push(r)
       })
-      const matAll = Object.keys(groupedByChapa)
+      const matAll = Object.keys(grouped)
       logs.push(`${rows.length} linhas lidas → ${matAll.length} colaboradores únicos`)
 
       // Buscar existentes e suas CNHs atuais em lotes de 100
       const existentesMap: Record<string, any> = {}
       const cnhExistenteMap: Record<string, any> = {}
-      
+
       for (let i = 0; i < matAll.length; i += 100) {
         const loteMatriculas = matAll.slice(i, i + 100)
-        
+
         const [{ data: ed }, { data: cd }] = await Promise.all([
           supabase.from('colaboradores')
-            .select('matricula, nome, situacao, sexo, estado_civil, data_nascimento, cpf, rg, rg_orgao, rg_uf, data_admissao, data_demissao, base_id, funcao_id, bases(nome), funcoes(nome)')
+            .select('matricula, nome, situacao, sexo, estado_civil, data_nascimento, cpf, rg, rg_orgao, rg_uf, data_admissao, data_demissao, base_id, funcao_id, gse, processo, gerencia, supervisor, email_corporativo, contato, bases(nome), funcoes(nome)')
             .in('matricula', loteMatriculas),
           supabase.from('cnhs')
             .select('matricula_colaborador, numero_cnh, categoria, data_vencimento')
             .in('matricula_colaborador', loteMatriculas)
             .eq('is_atual', true)
         ])
-        
+
         ;(ed || []).forEach((c: any) => { existentesMap[c.matricula] = c })
         ;(cd || []).forEach((c: any) => { cnhExistenteMap[c.matricula_colaborador] = c })
       }
 
       const diffs: DiffImport[] = []
 
-      for (const [mat, rowsColab] of Object.entries(groupedByChapa)) {
+      for (const [mat, rowsColab] of Object.entries(grouped)) {
         const r = rowsColab[0]
         const existente = existentesMap[mat]
-
-        // 1. Dados de vínculo básico
-        const nomeNovo        = String(r['NOME'] || '').trim().toUpperCase()
-        const situacaoNova    = mapSituacao(String(r['SITUAÇÃO'] || r['SITUACAO'] || ''))
-        const funcaoNome      = String(r['FUNÇÃO'] || r['FUNCAO'] || '').trim().toUpperCase()
-        const funcaoEnc       = funcoes.find(f => f.nome.toUpperCase() === funcaoNome)
-        const secaoKey        = String(r['SEÇÃO'] || r['SECAO'] || '').trim().toUpperCase()
-        const baseNome        = secaoMap[secaoKey] || null
-        const baseEnc         = baseNome ? bases.find(b => b.nome.toUpperCase() === baseNome.toUpperCase()) : null
-
         const tipo: 'novo' | 'atualizacao' = existente ? 'atualizacao' : 'novo'
 
-        if (tipo === 'novo' && situacaoNova === 'DEMITIDO') continue
-
-        // 2. Proteção contra colunas ausentes na planilha
-        const sexoNovo        = 'SEXO' in r ? (String(r['SEXO']).trim().toUpperCase() || null) : (existente?.sexo || null)
-        const estadoCivilNovo = 'ESTADO_CIVIL' in r ? (String(r['ESTADO_CIVIL']).trim().toUpperCase() || null) : (existente?.estado_civil || null)
-        const cpfNovo         = 'CPF' in r ? (String(r['CPF']).trim().replace(/\D/g, '') || null) : (existente?.cpf || null)
-        
-        const dtNascNova      = 'DTNASC' in r ? parseDateBR(r['DTNASC']) : (existente?.data_nascimento || null)
-        const dtAdmNova       = ('ADMISSÃO' in r || 'ADMISSAO' in r) ? parseDateBR(r['ADMISSÃO'] || r['ADMISSAO']) : (existente?.data_admissao || null)
-        const dtDemNova       = ('DEMISSÃO' in r || 'DEMISSAO' in r) ? parseDateBR(r['DEMISSÃO'] || r['DEMISSAO']) : (existente?.data_demissao || null)
-
-        const rgNovo          = 'CARTIDENTIDADE' in r ? (String(r['CARTIDENTIDADE']).trim() || null) : (existente?.rg || null)
-        const rgUfNovo        = 'UFCARTIDENT' in r ? (String(r['UFCARTIDENT']).trim().toUpperCase() || null) : (existente?.rg_uf || null)
-        const rgOrgaoNovo     = 'ORGEMISSORIDENT' in r ? (String(r['ORGEMISSORIDENT']).trim().toUpperCase() || null) : (existente?.rg_orgao || null)
-
-        // 3. Validação inteligente da CNH
-        const numeroCNH       = String(r['CARTMOTORISTA'] || '').trim() || null
-        const categoriaCNH    = String(r['TIPOCARTHABILIT'] || '').trim().toUpperCase() || null
-        const vencimentoCNH   = parseDateBR(r['DTVENCHABILIT'])
-
-        const cnhAtual = cnhExistenteMap[mat]
-        const cnhMudou = !!numeroCNH && (
-          !cnhAtual || 
-          cnhAtual.numero_cnh !== numeroCNH || 
-          cnhAtual.categoria !== categoriaCNH || 
-          cnhAtual.data_vencimento !== vencimentoCNH
-        )
-
-        // ── CONSTRUÇÃO DO DIFF ──
         const campos: DiffCampo[] = []
         const check = (campo: string, label: string, antigo: string | null | undefined, novo: string | null | undefined) => {
           const a = antigo || null; const n = novo || null
           if (a !== n) campos.push({ campo, label, antigo: a, novo: n })
         }
-
-        if (tipo === 'novo') {
-          if (nomeNovo)        campos.push({ campo: 'nome',          label: 'Nome',      antigo: null, novo: nomeNovo })
-          if (situacaoNova)    campos.push({ campo: 'situacao',      label: 'Situação',  antigo: null, novo: situacaoNova })
-          if (funcaoEnc)       campos.push({ campo: 'funcao',        label: 'Função',    antigo: null, novo: funcaoEnc.nome })
-          if (baseEnc)         campos.push({ campo: 'base',          label: 'Base',      antigo: null, novo: baseEnc.nome })
-          if (dtAdmNova)       campos.push({ campo: 'data_admissao', label: 'Admissão',  antigo: null, novo: fmtData(dtAdmNova) })
-          if (sexoNovo)        campos.push({ campo: 'sexo',          label: 'Sexo',      antigo: null, novo: sexoNovo })
-          if (estadoCivilNovo) campos.push({ campo: 'estado_civil',  label: 'Est. Civil',antigo: null, novo: estadoCivilNovo })
-          if (dtNascNova)      campos.push({ campo: 'data_nascimento',label: 'Dt. Nasc.',antigo: null, novo: fmtData(dtNascNova) })
-          if (cpfNovo)         campos.push({ campo: 'cpf',           label: 'CPF',       antigo: null, novo: cpfNovo })
-          if (rgNovo)          campos.push({ campo: 'rg',            label: 'RG',        antigo: null, novo: rgNovo })
-          if (rgOrgaoNovo)     campos.push({ campo: 'rg_orgao',      label: 'Órgão RG',  antigo: null, novo: rgOrgaoNovo })
-        } else {
-          check('nome',            'Nome',        existente.nome,                  nomeNovo)
-          check('situacao',        'Situação',    existente.situacao,              situacaoNova)
-          check('sexo',            'Sexo',        existente.sexo,                  sexoNovo)
-          check('estado_civil',    'Est. Civil',  existente.estado_civil,          estadoCivilNovo)
-          check('data_nascimento', 'Dt. Nasc.',   fmtData(existente.data_nascimento), fmtData(dtNascNova))
-          check('cpf',             'CPF',         existente.cpf,                   cpfNovo)
-          check('rg',              'RG',          existente.rg,                    rgNovo)
-          check('rg_orgao',        'Órgão RG',    existente.rg_orgao,              rgOrgaoNovo)
-          check('rg_uf',           'UF RG',       existente.rg_uf,                 rgUfNovo)
-          check('data_admissao',   'Admissão',    fmtData(existente.data_admissao),fmtData(dtAdmNova))
-          check('data_demissao',   'Demissão',    fmtData(existente.data_demissao),fmtData(dtDemNova))
-          check('funcao',          'Função',      existente.funcoes?.nome,         funcaoEnc?.nome)
-          check('base',            'Base',        existente.bases?.nome,           baseEnc?.nome)
+        const pushNovo = (cond: any, campo: string, label: string, novo: string | null) => {
+          if (cond) campos.push({ campo, label, antigo: null, novo })
         }
 
-        // Se nada mudou nos campos de RH E a CNH também não mudou, ignora este colaborador
-        if (campos.length === 0 && !cnhMudou && tipo === 'atualizacao') continue
+        // ═══════════════ FORMATO TOTVS — fluxo atual, inalterado ═══════════════
+        if (isTOTVS) {
+          // 1. Dados de vínculo básico
+          const nomeNovo        = String(r['NOME'] || '').trim().toUpperCase()
+          const situacaoNova    = mapSituacao(String(r['SITUAÇÃO'] || r['SITUACAO'] || ''))
+          const funcaoNome      = String(r['FUNÇÃO'] || r['FUNCAO'] || '').trim().toUpperCase()
+          const funcaoEnc       = funcoes.find(f => f.nome.toUpperCase() === funcaoNome)
+          const secaoKey        = String(r['SEÇÃO'] || r['SECAO'] || '').trim().toUpperCase()
+          const baseNome        = secaoMap[secaoKey] || null
+          const baseEnc         = baseNome ? bases.find(b => b.nome.toUpperCase() === baseNome.toUpperCase()) : null
+
+          // Rateio → Processo / Gerência / Coordenador (só aplica quando a coluna existe na planilha e há match no mapa)
+          const rateioKey       = String(r['RATEIO_FUNCIONARIO'] || '').trim().toUpperCase()
+          const cc              = ('RATEIO_FUNCIONARIO' in r && rateioKey) ? (ccMap[rateioKey] || null) : null
+          const processoNovo    = cc ? cc.processo   : (existente?.processo   || null)
+          const gerenciaNova    = cc ? cc.gerencia   : (existente?.gerencia   || null)
+          const supervisorNovo  = cc ? cc.coordenador : (existente?.supervisor || null)
+
+          if (tipo === 'novo' && situacaoNova === 'DEMITIDO') continue
+
+          // 2. Proteção contra colunas ausentes na planilha
+          const sexoNovo        = 'SEXO' in r ? (String(r['SEXO']).trim().toUpperCase() || null) : (existente?.sexo || null)
+          const estadoCivilNovo = 'ESTADO_CIVIL' in r ? (String(r['ESTADO_CIVIL']).trim().toUpperCase() || null) : (existente?.estado_civil || null)
+          const cpfNovo         = 'CPF' in r ? (String(r['CPF']).trim().replace(/\D/g, '') || null) : (existente?.cpf || null)
+
+          const dtNascNova      = 'DTNASC' in r ? parseDateBR(r['DTNASC']) : (existente?.data_nascimento || null)
+          const dtAdmNova       = ('ADMISSÃO' in r || 'ADMISSAO' in r) ? parseDateBR(r['ADMISSÃO'] || r['ADMISSAO']) : (existente?.data_admissao || null)
+          const dtDemNova       = ('DEMISSÃO' in r || 'DEMISSAO' in r) ? parseDateBR(r['DEMISSÃO'] || r['DEMISSAO']) : (existente?.data_demissao || null)
+
+          const rgNovo          = 'CARTIDENTIDADE' in r ? (String(r['CARTIDENTIDADE']).trim() || null) : (existente?.rg || null)
+          const rgUfNovo        = 'UFCARTIDENT' in r ? (String(r['UFCARTIDENT']).trim().toUpperCase() || null) : (existente?.rg_uf || null)
+          const rgOrgaoNovo     = 'ORGEMISSORIDENT' in r ? (String(r['ORGEMISSORIDENT']).trim().toUpperCase() || null) : (existente?.rg_orgao || null)
+
+          // 3. Validação inteligente da CNH
+          const numeroCNH       = String(r['CARTMOTORISTA'] || '').trim() || null
+          const categoriaCNH    = String(r['TIPOCARTHABILIT'] || '').trim().toUpperCase() || null
+          const vencimentoCNH   = parseDateBR(r['DTVENCHABILIT'])
+
+          const cnhAtual = cnhExistenteMap[mat]
+          const cnhMudou = !!numeroCNH && (
+            !cnhAtual ||
+            cnhAtual.numero_cnh !== numeroCNH ||
+            cnhAtual.categoria !== categoriaCNH ||
+            cnhAtual.data_vencimento !== vencimentoCNH
+          )
+
+          if (tipo === 'novo') {
+            if (nomeNovo)        campos.push({ campo: 'nome',          label: 'Nome',      antigo: null, novo: nomeNovo })
+            if (situacaoNova)    campos.push({ campo: 'situacao',      label: 'Situação',  antigo: null, novo: situacaoNova })
+            if (funcaoEnc)       campos.push({ campo: 'funcao',        label: 'Função',    antigo: null, novo: funcaoEnc.nome })
+            if (baseEnc)         campos.push({ campo: 'base',          label: 'Base',      antigo: null, novo: baseEnc.nome })
+            if (processoNovo)   campos.push({ campo: 'processo',   label: 'Processo',    antigo: null, novo: processoNovo })
+            if (gerenciaNova)   campos.push({ campo: 'gerencia',   label: 'Gerência',    antigo: null, novo: gerenciaNova })
+            if (supervisorNovo) campos.push({ campo: 'supervisor', label: 'Coordenador', antigo: null, novo: supervisorNovo })
+            if (dtAdmNova)       campos.push({ campo: 'data_admissao', label: 'Admissão',  antigo: null, novo: fmtData(dtAdmNova) })
+            if (sexoNovo)        campos.push({ campo: 'sexo',          label: 'Sexo',      antigo: null, novo: sexoNovo })
+            if (estadoCivilNovo) campos.push({ campo: 'estado_civil',  label: 'Est. Civil',antigo: null, novo: estadoCivilNovo })
+            if (dtNascNova)      campos.push({ campo: 'data_nascimento',label: 'Dt. Nasc.',antigo: null, novo: fmtData(dtNascNova) })
+            if (cpfNovo)         campos.push({ campo: 'cpf',           label: 'CPF',       antigo: null, novo: cpfNovo })
+            if (rgNovo)          campos.push({ campo: 'rg',            label: 'RG',        antigo: null, novo: rgNovo })
+            if (rgOrgaoNovo)     campos.push({ campo: 'rg_orgao',      label: 'Órgão RG',  antigo: null, novo: rgOrgaoNovo })
+          } else {
+            check('nome',            'Nome',        existente.nome,                  nomeNovo)
+            check('situacao',        'Situação',    existente.situacao,              situacaoNova)
+            check('sexo',            'Sexo',        existente.sexo,                  sexoNovo)
+            check('estado_civil',    'Est. Civil',  existente.estado_civil,          estadoCivilNovo)
+            check('data_nascimento', 'Dt. Nasc.',   fmtData(existente.data_nascimento), fmtData(dtNascNova))
+            check('cpf',             'CPF',         existente.cpf,                   cpfNovo)
+            check('rg',              'RG',          existente.rg,                    rgNovo)
+            check('rg_orgao',        'Órgão RG',    existente.rg_orgao,              rgOrgaoNovo)
+            check('rg_uf',           'UF RG',       existente.rg_uf,                 rgUfNovo)
+            check('data_admissao',   'Admissão',    fmtData(existente.data_admissao),fmtData(dtAdmNova))
+            check('data_demissao',   'Demissão',    fmtData(existente.data_demissao),fmtData(dtDemNova))
+            check('funcao',          'Função',      existente.funcoes?.nome,         funcaoEnc?.nome)
+            check('base',            'Base',        existente.bases?.nome,           baseEnc?.nome)
+            check('processo',        'Processo',    existente.processo,              processoNovo)
+            check('gerencia',        'Gerência',    existente.gerencia,              gerenciaNova)
+            check('supervisor',      'Coordenador', existente.supervisor,            supervisorNovo)
+          }
+
+          if (campos.length === 0 && !cnhMudou && tipo === 'atualizacao') continue
+
+          diffs.push({
+            matricula: mat, nome: nomeNovo, tipo, campos, selecionado: true,
+            dados: {
+              matricula: mat, nome: nomeNovo, situacao: situacaoNova,
+              sexo: sexoNovo, estado_civil: estadoCivilNovo, data_nascimento: dtNascNova,
+              cpf: cpfNovo, rg: rgNovo, rg_orgao: rgOrgaoNovo, rg_uf: rgUfNovo, data_admissao: dtAdmNova, data_demissao: dtDemNova,
+              funcao_id: funcaoEnc?.id || existente?.funcao_id || null,
+              base_id: baseEnc?.id || existente?.base_id || null,
+              processo: processoNovo,
+              gerencia: gerenciaNova,
+              supervisor: supervisorNovo,
+            },
+            cnh: cnhMudou ? { numero: numeroCNH, categoria: categoriaCNH, vencimento: vencimentoCNH } : undefined,
+          })
+          continue
+        }
+
+        // ═══════════════ FORMATO EXPORT DO SISTEMA ═══════════════
+        // Célula vazia ou "—" = campo não fornecido → preserva o valor atual do banco
+        const val = (key: string): string | undefined => {
+          const raw = r[key]
+          if (raw === undefined || raw === null) return undefined
+          const s = String(raw).trim()
+          if (s === '' || s === '—' || s === '-') return undefined
+          return s
+        }
+        const dateVal = (key: string, current: string | null | undefined): string | null => {
+          const raw = val(key)
+          if (raw === undefined) return current || null
+          const p = parseDateBR(raw)
+          return p ?? (current || null)
+        }
+        const gseStr = (v: any) => (v === null || v === undefined || v === '') ? null : String(v)
+
+        const nomeTxt         = val('Nome')
+        const nomeNovo        = nomeTxt ? nomeTxt.toUpperCase() : (existente?.nome || '')
+        const situacaoTxt     = val('Situação')
+        const situacaoNova    = situacaoTxt ? mapSituacao(situacaoTxt) : (existente?.situacao || null)
+
+        const funcaoTxt       = val('Função')
+        const funcaoEnc       = funcaoTxt ? funcoes.find(f => f.nome.toUpperCase() === funcaoTxt.toUpperCase()) : null
+        const funcaoIdNova    = funcaoEnc ? funcaoEnc.id : (existente?.funcao_id || null)
+        const funcaoNomeNova  = funcaoEnc ? funcaoEnc.nome : (existente?.funcoes?.nome || null)
+
+        const baseTxt         = val('Base')
+        const baseEnc         = baseTxt ? bases.find(b => b.nome.toUpperCase() === baseTxt.toUpperCase()) : null
+        const baseIdNova      = baseEnc ? baseEnc.id : (existente?.base_id || null)
+        const baseNomeNova    = baseEnc ? baseEnc.nome : (existente?.bases?.nome || null)
+
+        const gseTxt          = val('GSE')
+        const gseNova         = (gseTxt && /\d/.test(gseTxt)) ? parseInt(gseTxt.replace(/\D/g, '')) : (existente?.gse ?? null)
+        const processoNovo    = val('Processo')     ?? (existente?.processo || null)
+        const gerenciaNova    = val('Gerência')     ?? (existente?.gerencia || null)
+        const supervisorNovo  = val('Coordenador')  ?? (existente?.supervisor || null)
+        const sexoNovo        = val('Sexo')         ?? (existente?.sexo || null)
+        const estadoCivilNovo = val('Estado Civil') ?? (existente?.estado_civil || null)
+        const cpfTxt          = val('CPF')
+        const cpfNovo         = cpfTxt ? (cpfTxt.replace(/\D/g, '') || null) : (existente?.cpf || null)
+        const rgNovo          = val('RG')       ?? (existente?.rg || null)
+        const rgOrgaoNovo     = val('Órgão RG') ?? (existente?.rg_orgao || null)
+        const rgUfTxt         = val('UF RG')
+        const rgUfNovo        = rgUfTxt ? rgUfTxt.toUpperCase() : (existente?.rg_uf || null)
+        const emailNovo       = val('E-mail')  ?? (existente?.email_corporativo || null)
+        const contatoNovo     = val('Contato') ?? (existente?.contato || null)
+        const dtNascNova      = dateVal('Dt. Nascimento', existente?.data_nascimento)
+        const dtAdmNova       = dateVal('Admissão', existente?.data_admissao)
+        const dtDemNova       = dateVal('Demissão', existente?.data_demissao)
+
+        if (tipo === 'novo' && situacaoNova === 'DEMITIDO') continue
+
+        if (tipo === 'novo') {
+          pushNovo(nomeNovo, 'nome', 'Nome', nomeNovo || null)
+          pushNovo(situacaoNova, 'situacao', 'Situação', situacaoNova)
+          pushNovo(funcaoNomeNova, 'funcao', 'Função', funcaoNomeNova)
+          pushNovo(baseNomeNova, 'base', 'Base', baseNomeNova)
+          pushNovo(gseNova != null, 'gse', 'GSE', gseStr(gseNova))
+          pushNovo(processoNovo, 'processo', 'Processo', processoNovo)
+          pushNovo(gerenciaNova, 'gerencia', 'Gerência', gerenciaNova)
+          pushNovo(supervisorNovo, 'supervisor', 'Coordenador', supervisorNovo)
+          pushNovo(dtAdmNova, 'data_admissao', 'Admissão', fmtData(dtAdmNova))
+          pushNovo(dtDemNova, 'data_demissao', 'Demissão', fmtData(dtDemNova))
+          pushNovo(sexoNovo, 'sexo', 'Sexo', sexoNovo)
+          pushNovo(estadoCivilNovo, 'estado_civil', 'Est. Civil', estadoCivilNovo)
+          pushNovo(dtNascNova, 'data_nascimento', 'Dt. Nasc.', fmtData(dtNascNova))
+          pushNovo(cpfNovo, 'cpf', 'CPF', cpfNovo)
+          pushNovo(rgNovo, 'rg', 'RG', rgNovo)
+          pushNovo(rgOrgaoNovo, 'rg_orgao', 'Órgão RG', rgOrgaoNovo)
+          pushNovo(rgUfNovo, 'rg_uf', 'UF RG', rgUfNovo)
+          pushNovo(emailNovo, 'email', 'E-mail', emailNovo)
+          pushNovo(contatoNovo, 'contato', 'Contato', contatoNovo)
+        } else {
+          check('nome', 'Nome', existente.nome, nomeNovo)
+          check('situacao', 'Situação', existente.situacao, situacaoNova)
+          check('funcao', 'Função', existente.funcoes?.nome, funcaoNomeNova)
+          check('base', 'Base', existente.bases?.nome, baseNomeNova)
+          check('gse', 'GSE', gseStr(existente.gse), gseStr(gseNova))
+          check('processo', 'Processo', existente.processo, processoNovo)
+          check('gerencia', 'Gerência', existente.gerencia, gerenciaNova)
+          check('supervisor', 'Coordenador', existente.supervisor, supervisorNovo)
+          check('sexo', 'Sexo', existente.sexo, sexoNovo)
+          check('estado_civil', 'Est. Civil', existente.estado_civil, estadoCivilNovo)
+          check('data_nascimento', 'Dt. Nasc.', fmtData(existente.data_nascimento), fmtData(dtNascNova))
+          check('cpf', 'CPF', existente.cpf, cpfNovo)
+          check('rg', 'RG', existente.rg, rgNovo)
+          check('rg_orgao', 'Órgão RG', existente.rg_orgao, rgOrgaoNovo)
+          check('rg_uf', 'UF RG', existente.rg_uf, rgUfNovo)
+          check('email', 'E-mail', existente.email_corporativo, emailNovo)
+          check('contato', 'Contato', existente.contato, contatoNovo)
+          check('data_admissao', 'Admissão', fmtData(existente.data_admissao), fmtData(dtAdmNova))
+          check('data_demissao', 'Demissão', fmtData(existente.data_demissao), fmtData(dtDemNova))
+        }
+
+        if (campos.length === 0 && tipo === 'atualizacao') continue
 
         diffs.push({
           matricula: mat, nome: nomeNovo, tipo, campos, selecionado: true,
           dados: {
             matricula: mat, nome: nomeNovo, situacao: situacaoNova,
+            funcao_id: funcaoIdNova, base_id: baseIdNova, gse: gseNova,
+            processo: processoNovo, gerencia: gerenciaNova, supervisor: supervisorNovo,
             sexo: sexoNovo, estado_civil: estadoCivilNovo, data_nascimento: dtNascNova,
-            cpf: cpfNovo, rg: rgNovo, rg_orgao: rgOrgaoNovo, rg_uf: rgUfNovo, data_admissao: dtAdmNova, data_demissao: dtDemNova,
-            funcao_id: funcaoEnc?.id || existente?.funcao_id || null,
-            base_id: baseEnc?.id || existente?.base_id || null,
+            cpf: cpfNovo, rg: rgNovo, rg_orgao: rgOrgaoNovo, rg_uf: rgUfNovo,
+            data_admissao: dtAdmNova, data_demissao: dtDemNova,
+            email_corporativo: emailNovo, contato: contatoNovo,
           },
-          // A CNH só vai para a fila de salvamento se de fato houver alteração
-          cnh: cnhMudou ? { numero: numeroCNH, categoria: categoriaCNH, vencimento: vencimentoCNH } : undefined,
+          cnh: undefined,
         })
       }
 
       logs.push(`${diffs.filter(d => d.tipo === 'novo').length} novos colaboradores`)
       logs.push(`${diffs.filter(d => d.tipo === 'atualizacao').length} atualizações reais encontradas`)
-      logs.push(`🛡️ GSE, Processo, Gerência e Coordenador mantidos intactos conforme o banco.`)
+      if (isTOTVS) logs.push(`🛡️ GSE, Processo, Gerência e Coordenador mantidos intactos conforme o banco.`)
+      else logs.push('📋 Todas as colunas do export atualizam; células vazias ou "—" preservam o valor atual.')
 
       setImportDiffs(diffs); setImportLog(logs); setImportStep(2)
     } catch (e: any) {
@@ -716,7 +866,7 @@ function toggleOrdem(coluna: OrdemColuna) {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
               <div>
                 <h2 style={{ fontSize: 17, fontWeight: 600, margin: 0 }}>Importar Colaboradores</h2>
-                <p style={{ fontSize: 12, color: '#888', margin: '3px 0 0' }}>{importStep === 1 ? 'Selecione o arquivo do TOTVS' : `${importDiffs.length} alterações encontradas`}</p>
+                <p style={{ fontSize: 12, color: '#888', margin: '3px 0 0' }}>{importStep === 1 ? 'TOTVS (coluna CHAPA) ou export do sistema (coluna Matrícula)' : `${importDiffs.length} alterações encontradas`}</p>
               </div>
               <button onClick={() => setImportModal(false)} style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: '#aaa' }}>✕</button>
             </div>
