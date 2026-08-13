@@ -19,11 +19,12 @@ interface TipoExameMedico { id: number; nome: string }
 interface GSEExame { id: number; gse_id: number; tipo_exame_medico_id: number; no_adm: boolean; no_per: boolean; no_ret: boolean; no_mro: boolean; no_dem: boolean; tipos_exame_medico?: { nome: string } | null }
 interface Supervisor { id: number; nome: string }
 interface Processo { id: number; nome: string }
+interface CentroCusto { id: number; centro_custo: string; processo: string | null; gerencia: string | null; coordenador: string | null }
 interface MatrizNR { id: string; funcao: string; processo: string | null; treinamento: string; obrigatorio: string }
 interface ConfigEmpresa { id: number; razao_social: string; cnpj: string; cnae: string; grau_risco: string; endereco: string; numero: string; bairro: string; cidade: string; uf: string; telefone: string }
 interface MedicoASO { id: number; nome: string; crm: string; rqe: string; especialidade: string; telefone: string; ativo: boolean; created_at: string }
 
-type Aba = 'usuarios' | 'bases' | 'funcoes' | 'tipos_exame' | 'gerencias' | 'gse' | 'supervisores' | 'processos' | 'obrigatoriedade_nr' | 'empresa' | 'medicos'
+type Aba = 'usuarios' | 'bases' | 'funcoes' | 'tipos_exame' | 'gerencias' | 'gse' | 'supervisores' | 'processos' | 'centro_custo' | 'obrigatoriedade_nr' | 'empresa' | 'medicos'
 
 // ─── CONSTANTES ───────────────────────────────────────────────────────────────
 const MODULOS = [
@@ -652,6 +653,138 @@ function AbaProcessos() {
   )
 }
 
+// ─── ABA CENTRO DE CUSTO ──────────────────────────────────────────────────────
+function AbaCentroCusto() {
+  const [itens, setItens] = useState<CentroCusto[]>([])
+  const [gerencias, setGerencias] = useState<{ sigla: string; nome: string }[]>([])
+  const [supervisores, setSupervisores] = useState<{ nome: string }[]>([])
+  const [processos, setProcessos] = useState<{ nome: string }[]>([])
+  const [carregando, setCarregando] = useState(true)
+  const [modal, setModal] = useState<'novo' | 'editar' | null>(null)
+  const [selecionado, setSelecionado] = useState<CentroCusto | null>(null)
+  const [salvando, setSalvando] = useState(false)
+  const [erro, setErro] = useState<string | null>(null)
+  const [busca, setBusca] = useState('')
+  const [form, setForm] = useState({ centro_custo: '', processo: '', gerencia: '', coordenador: '' })
+
+  useEffect(() => { carregar() }, [])
+  async function carregar() {
+    setCarregando(true)
+    const [{ data: cc }, { data: g }, { data: s }, { data: p }] = await Promise.all([
+      supabase.from('centro_custo_map').select('*').order('centro_custo'),
+      supabase.from('gerencias').select('sigla, nome').order('sigla'),
+      supabase.from('supervisores').select('nome').order('nome'),
+      supabase.from('processos').select('nome').order('nome'),
+    ])
+    setItens((cc as CentroCusto[]) || [])
+    setGerencias(g || []); setSupervisores(s || []); setProcessos(p || [])
+    setCarregando(false)
+  }
+  function abrirNovo() { setForm({ centro_custo: '', processo: '', gerencia: '', coordenador: '' }); setErro(null); setModal('novo') }
+  function abrirEditar(c: CentroCusto) { setSelecionado(c); setForm({ centro_custo: c.centro_custo, processo: c.processo || '', gerencia: c.gerencia || '', coordenador: c.coordenador || '' }); setErro(null); setModal('editar') }
+  async function salvar() {
+    if (!form.centro_custo.trim()) { setErro('Informe o código do centro de custo.'); return }
+    setSalvando(true); setErro(null)
+    const payload = {
+      centro_custo: form.centro_custo.trim(),
+      processo: form.processo || null,
+      gerencia: form.gerencia || null,
+      coordenador: form.coordenador || null,
+    }
+    let error
+    if (modal === 'novo') ({ error } = await supabase.from('centro_custo_map').insert(payload))
+    else if (selecionado) ({ error } = await supabase.from('centro_custo_map').update(payload).eq('id', selecionado.id))
+    setSalvando(false)
+    if (error) { setErro(error.code === '23505' ? 'Já existe esse código de centro de custo.' : 'Erro ao salvar: ' + error.message); return }
+    setModal(null); carregar()
+  }
+  async function excluir(id: number) {
+    if (!confirm('Excluir este centro de custo? A importação do TOTVS deixará de reconhecer esse código.')) return
+    await supabase.from('centro_custo_map').delete().eq('id', id); carregar()
+  }
+  const filtrados = busca ? itens.filter(c =>
+    c.centro_custo.toLowerCase().includes(busca.toLowerCase()) ||
+    (c.coordenador || '').toLowerCase().includes(busca.toLowerCase()) ||
+    (c.processo || '').toLowerCase().includes(busca.toLowerCase())
+  ) : itens
+
+  return (
+    <div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <input style={{ ...inputStyle, width: 280 }} placeholder="Buscar por código, coordenador ou processo..." value={busca} onChange={e => setBusca(e.target.value)} />
+          <span style={{ fontSize: 13, color: '#888' }}>{filtrados.length} centros de custo</span>
+        </div>
+        <button style={btnPrimario} onClick={abrirNovo}>+ Novo Centro de Custo</button>
+      </div>
+      <p style={{ fontSize: 12, color: '#aaa', margin: '0 0 20px' }}>Define o que cada código de rateio significa. As alterações valem na próxima importação do TOTVS.</p>
+      {carregando ? <p style={{ color: '#888', fontSize: 14 }}>Carregando...</p> : (
+        <div style={{ borderRadius: 12, border: '1px solid #f0f0f0', overflow: 'hidden' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', backgroundColor: 'white', fontSize: 13 }}>
+            <thead><tr style={{ backgroundColor: '#fafafa', borderBottom: '1px solid #f0f0f0' }}>
+              {['Centro de Custo', 'Processo', 'Gerência', 'Coordenador', 'Ações'].map(h => <th key={h} style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 500, color: '#555' }}>{h}</th>)}
+            </tr></thead>
+            <tbody>
+              {filtrados.length === 0
+                ? <tr><td colSpan={5} style={{ padding: '32px 16px', textAlign: 'center', color: '#aaa', fontSize: 13 }}>Nenhum centro de custo encontrado.</td></tr>
+                : filtrados.map((c, i) => (
+                  <tr key={c.id} style={{ borderBottom: '1px solid #f5f5f5', backgroundColor: i % 2 === 0 ? 'white' : '#fafafa' }}>
+                    <td style={{ padding: '10px 16px', fontWeight: 600, color: cor, fontFamily: 'monospace' }}>{c.centro_custo}</td>
+                    <td style={{ padding: '10px 16px', color: '#333' }}>{c.processo || <span style={{ color: '#ccc' }}>—</span>}</td>
+                    <td style={{ padding: '10px 16px', color: '#666' }}>{c.gerencia || <span style={{ color: '#ccc' }}>—</span>}</td>
+                    <td style={{ padding: '10px 16px', color: '#666' }}>{c.coordenador || <span style={{ color: '#ccc' }}>—</span>}</td>
+                    <td style={{ padding: '10px 16px' }}>
+                      <div style={{ display: 'flex', gap: 8 }}>
+                        <button style={btnSecundario} onClick={() => abrirEditar(c)}>Editar</button>
+                        <button style={btnPerigo} onClick={() => excluir(c.id)}>Excluir</button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {(modal === 'novo' || modal === 'editar') && (
+        <Modal titulo={modal === 'novo' ? 'Novo Centro de Custo' : 'Editar Centro de Custo'} onFechar={() => setModal(null)}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <div>
+              <label style={labelStyle}>Código do Centro de Custo *</label>
+              <input style={inputStyle} value={form.centro_custo} onChange={e => setForm(f => ({ ...f, centro_custo: e.target.value }))} placeholder="Ex: 2.127.05" autoFocus />
+            </div>
+            <div>
+              <label style={labelStyle}>Processo</label>
+              <select style={inputStyle} value={form.processo} onChange={e => setForm(f => ({ ...f, processo: e.target.value }))}>
+                <option value="">Selecione...</option>
+                {processos.map(p => <option key={p.nome} value={p.nome}>{p.nome}</option>)}
+              </select>
+            </div>
+            <div>
+              <label style={labelStyle}>Gerência</label>
+              <select style={inputStyle} value={form.gerencia} onChange={e => setForm(f => ({ ...f, gerencia: e.target.value }))}>
+                <option value="">Selecione...</option>
+                {gerencias.map(g => <option key={g.sigla} value={g.sigla}>{g.sigla} — {g.nome}</option>)}
+              </select>
+            </div>
+            <div>
+              <label style={labelStyle}>Coordenador</label>
+              <select style={inputStyle} value={form.coordenador} onChange={e => setForm(f => ({ ...f, coordenador: e.target.value }))}>
+                <option value="">Selecione...</option>
+                {supervisores.map(s => <option key={s.nome} value={s.nome}>{s.nome}</option>)}
+              </select>
+            </div>
+            {erro && <p style={{ fontSize: 12, color: '#dc2626', margin: 0 }}>{erro}</p>}
+            <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end', marginTop: 8 }}>
+              <button style={btnSecundario} onClick={() => setModal(null)}>Cancelar</button>
+              <button style={{ ...btnPrimario, opacity: salvando ? 0.7 : 1 }} onClick={salvar} disabled={salvando}>{salvando ? 'Salvando...' : 'Salvar'}</button>
+            </div>
+          </div>
+        </Modal>
+      )}
+    </div>
+  )
+}
+
 // ─── ABA OBRIGATORIEDADE NR ───────────────────────────────────────────────────
 function AbaObrigatoriedadeNR() {
   const [nrSelecionada, setNrSelecionada] = useState(NRS_ALVO[0])
@@ -994,6 +1127,7 @@ export default function ConfiguracoesPage() {
     { key: 'gerencias', label: 'Gerências', descricao: 'Gerências e seus responsáveis' },
     { key: 'supervisores', label: 'Supervisores', descricao: 'Cadastro de supervisores' },
     { key: 'processos', label: 'Processos', descricao: 'Processos operacionais dos colaboradores' },
+    { key: 'centro_custo', label: 'Centro de Custo', descricao: 'De-para de rateio: código → processo, gerência e coordenador' },
     { key: 'gse', label: 'GSE', descricao: 'Grupos Similares de Exposição — funções e exames por tipo de ASO' },
     { key: 'obrigatoriedade_nr', label: 'Obrigatoriedade NR', descricao: 'Funções obrigadas por norma regulamentadora' },
     { key: 'empresa', label: 'Empresa', descricao: 'Dados da empresa exibidos no ASO' },
@@ -1020,6 +1154,7 @@ export default function ConfiguracoesPage() {
       {abaAtiva === 'gerencias' && <AbaGerencias />}
       {abaAtiva === 'supervisores' && <AbaSupervisores />}
       {abaAtiva === 'processos' && <AbaProcessos />}
+      {abaAtiva === 'centro_custo' && <AbaCentroCusto />}
       {abaAtiva === 'gse' && <AbaGSE />}
       {abaAtiva === 'obrigatoriedade_nr' && <AbaObrigatoriedadeNR />}
       {abaAtiva === 'empresa' && <AbaEmpresa />}
