@@ -18,11 +18,12 @@ interface GSEFuncao { id: number; gse_id: number; funcao: string }
 interface TipoExameMedico { id: number; nome: string }
 interface GSEExame { id: number; gse_id: number; tipo_exame_medico_id: number; no_adm: boolean; no_per: boolean; no_ret: boolean; no_mro: boolean; no_dem: boolean; tipos_exame_medico?: { nome: string } | null }
 interface Supervisor { id: number; nome: string }
+interface Processo { id: number; nome: string }
 interface MatrizNR { id: string; funcao: string; processo: string | null; treinamento: string; obrigatorio: string }
 interface ConfigEmpresa { id: number; razao_social: string; cnpj: string; cnae: string; grau_risco: string; endereco: string; numero: string; bairro: string; cidade: string; uf: string; telefone: string }
 interface MedicoASO { id: number; nome: string; crm: string; rqe: string; especialidade: string; telefone: string; ativo: boolean; created_at: string }
 
-type Aba = 'usuarios' | 'bases' | 'funcoes' | 'tipos_exame' | 'gerencias' | 'gse' | 'supervisores' | 'obrigatoriedade_nr' | 'empresa' | 'medicos'
+type Aba = 'usuarios' | 'bases' | 'funcoes' | 'tipos_exame' | 'gerencias' | 'gse' | 'supervisores' | 'processos' | 'obrigatoriedade_nr' | 'empresa' | 'medicos'
 
 // ─── CONSTANTES ───────────────────────────────────────────────────────────────
 const MODULOS = [
@@ -567,6 +568,90 @@ function AbaSupervisores() {
   )
 }
 
+// ─── ABA PROCESSOS ────────────────────────────────────────────────────────────
+function AbaProcessos() {
+  const [processos, setProcessos] = useState<Processo[]>([])
+  const [carregando, setCarregando] = useState(true)
+  const [modal, setModal] = useState<'novo' | 'editar' | null>(null)
+  const [selecionado, setSelecionado] = useState<Processo | null>(null)
+  const [salvando, setSalvando] = useState(false)
+  const [nome, setNome] = useState('')
+  const [busca, setBusca] = useState('')
+  const [erro, setErro] = useState<string | null>(null)
+
+  useEffect(() => { carregar() }, [])
+  async function carregar() { setCarregando(true); const { data } = await supabase.from('processos').select('*').order('nome'); setProcessos(data || []); setCarregando(false) }
+  function abrirNovo() { setNome(''); setErro(null); setModal('novo') }
+  function abrirEditar(p: Processo) { setSelecionado(p); setNome(p.nome); setErro(null); setModal('editar') }
+  async function salvar() {
+    if (!nome.trim()) return
+    setSalvando(true); setErro(null)
+    let error
+    if (modal === 'novo') ({ error } = await supabase.from('processos').insert({ nome: nome.trim() }))
+    else if (selecionado) ({ error } = await supabase.from('processos').update({ nome: nome.trim() }).eq('id', selecionado.id))
+    setSalvando(false)
+    if (error) { setErro(error.code === '23505' ? 'Já existe um processo com esse nome.' : 'Erro ao salvar: ' + error.message); return }
+    setModal(null); carregar()
+  }
+  async function excluir(id: number) {
+    if (!confirm('Excluir este processo? Colaboradores vinculados manterão o texto atual, mas ele deixará de aparecer nas listas.')) return
+    await supabase.from('processos').delete().eq('id', id); carregar()
+  }
+  const filtrados = busca ? processos.filter(p => p.nome.toLowerCase().includes(busca.toLowerCase())) : processos
+
+  return (
+    <div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <input style={{ ...inputStyle, width: 240 }} placeholder="Buscar processo..." value={busca} onChange={e => setBusca(e.target.value)} />
+          <span style={{ fontSize: 13, color: '#888' }}>{filtrados.length} processos</span>
+        </div>
+        <button style={btnPrimario} onClick={abrirNovo}>+ Novo Processo</button>
+      </div>
+      {carregando ? <p style={{ color: '#888', fontSize: 14 }}>Carregando...</p> : (
+        <div style={{ borderRadius: 12, border: '1px solid #f0f0f0', overflow: 'hidden' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', backgroundColor: 'white', fontSize: 13 }}>
+            <thead><tr style={{ backgroundColor: '#fafafa', borderBottom: '1px solid #f0f0f0' }}>
+              {['#', 'Nome do Processo', 'Ações'].map(h => <th key={h} style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 500, color: '#555' }}>{h}</th>)}
+            </tr></thead>
+            <tbody>
+              {filtrados.length === 0
+                ? <tr><td colSpan={3} style={{ padding: '32px 16px', textAlign: 'center', color: '#aaa', fontSize: 13 }}>Nenhum processo encontrado.</td></tr>
+                : filtrados.map((p, i) => (
+                  <tr key={p.id} style={{ borderBottom: '1px solid #f5f5f5', backgroundColor: i % 2 === 0 ? 'white' : '#fafafa' }}>
+                    <td style={{ padding: '10px 16px', color: '#aaa', fontSize: 12 }}>{p.id}</td>
+                    <td style={{ padding: '10px 16px', fontWeight: 500, color: '#333' }}>{p.nome}</td>
+                    <td style={{ padding: '10px 16px' }}>
+                      <div style={{ display: 'flex', gap: 8 }}>
+                        <button style={btnSecundario} onClick={() => abrirEditar(p)}>Editar</button>
+                        <button style={btnPerigo} onClick={() => excluir(p.id)}>Excluir</button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {(modal === 'novo' || modal === 'editar') && (
+        <Modal titulo={modal === 'novo' ? 'Novo Processo' : 'Editar Processo'} onFechar={() => setModal(null)}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <div>
+              <label style={labelStyle}>Nome do processo *</label>
+              <input style={inputStyle} value={nome} onChange={e => setNome(e.target.value)} placeholder="Ex: Construção" onKeyDown={e => e.key === 'Enter' && salvar()} autoFocus />
+            </div>
+            {erro && <p style={{ fontSize: 12, color: '#dc2626', margin: 0 }}>{erro}</p>}
+            <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end', marginTop: 8 }}>
+              <button style={btnSecundario} onClick={() => setModal(null)}>Cancelar</button>
+              <button style={{ ...btnPrimario, opacity: salvando ? 0.7 : 1 }} onClick={salvar} disabled={salvando}>{salvando ? 'Salvando...' : 'Salvar'}</button>
+            </div>
+          </div>
+        </Modal>
+      )}
+    </div>
+  )
+}
+
 // ─── ABA OBRIGATORIEDADE NR ───────────────────────────────────────────────────
 function AbaObrigatoriedadeNR() {
   const [nrSelecionada, setNrSelecionada] = useState(NRS_ALVO[0])
@@ -908,6 +993,7 @@ export default function ConfiguracoesPage() {
     { key: 'tipos_exame', label: 'Tipos de Exame', descricao: 'Exames e treinamentos com regras de vencimento' },
     { key: 'gerencias', label: 'Gerências', descricao: 'Gerências e seus responsáveis' },
     { key: 'supervisores', label: 'Supervisores', descricao: 'Cadastro de supervisores' },
+    { key: 'processos', label: 'Processos', descricao: 'Processos operacionais dos colaboradores' },
     { key: 'gse', label: 'GSE', descricao: 'Grupos Similares de Exposição — funções e exames por tipo de ASO' },
     { key: 'obrigatoriedade_nr', label: 'Obrigatoriedade NR', descricao: 'Funções obrigadas por norma regulamentadora' },
     { key: 'empresa', label: 'Empresa', descricao: 'Dados da empresa exibidos no ASO' },
@@ -933,6 +1019,7 @@ export default function ConfiguracoesPage() {
       {abaAtiva === 'tipos_exame' && <AbaTiposExame />}
       {abaAtiva === 'gerencias' && <AbaGerencias />}
       {abaAtiva === 'supervisores' && <AbaSupervisores />}
+      {abaAtiva === 'processos' && <AbaProcessos />}
       {abaAtiva === 'gse' && <AbaGSE />}
       {abaAtiva === 'obrigatoriedade_nr' && <AbaObrigatoriedadeNR />}
       {abaAtiva === 'empresa' && <AbaEmpresa />}
