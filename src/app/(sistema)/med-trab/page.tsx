@@ -707,11 +707,13 @@ function ModalNovoASO({ colab, onClose, onSalvo }: { colab: Colaborador; onClose
   // Upload modificado para usar o Cloudflare R2
   async function salvar() {
     if (!dataRealizacao) { setErro('Data de realização é obrigatória.'); return }
+    if (!dataCompletaValida(dataRealizacao)) { setErro('Data de realização inválida. Verifique o ano (deve ter 4 dígitos, ex: 2026).'); return }
+    if (!semVencimento && dataVencimento && !dataCompletaValida(dataVencimento)) { setErro('Data de vencimento inválida. Verifique o ano.'); return }
     setSalvando(true); setErro('')
     try {
       let urlArquivo: string | null = null
-      
-     if (arquivo) { 
+
+     if (arquivo) {
         const ext = arquivo.name.split('.').pop(); 
         const path = `asos/${colab.matricula}/${tipo}/${Date.now()}.${ext}`; 
         
