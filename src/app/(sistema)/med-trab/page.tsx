@@ -56,7 +56,14 @@ type AbaModal = 'info' | 'documento' | 'programacao' | 'auditoria' | 'historico'
 function formatarData(d: string | null | undefined): string { if (!d) return '—'; return new Date(d + 'T12:00:00').toLocaleDateString('pt-BR') }
 function calcularDias(dv: string | null): number | null { if (!dv) return null; return Math.ceil((new Date(dv + 'T12:00:00').getTime() - new Date().getTime()) / 86400000) }
 function getStatusASO(dv: string | null): StatusASO { const dias = calcularDias(dv); if (dias === null) return 'sem_aso'; if (dias < 0) return 'vencido'; if (dias <= 30) return 'atencao'; if (dias <= 60) return 'critico'; return 'no_prazo' }
-function getASOPorTipo(asos: ASO[], tipo: string): ASO | null { const lista = (asos || []).filter(a => a.tipo === tipo); if (!lista.length) return null; return lista.sort((a, b) => new Date(b.data_realizacao).getTime() - new Date(a.data_realizacao).getTime())[0] }
+function dataValida(d: string | null | undefined): boolean {
+  if (!d || !/^\d{4}-\d{2}-\d{2}$/.test(d)) return false
+  const t = new Date(d + 'T12:00:00').getTime()
+  if (isNaN(t)) return false
+  const ano = parseInt(d.slice(0, 4), 10)
+  return ano >= 1950 && ano <= 2100
+}
+function getASOPorTipo(asos: ASO[], tipo: string): ASO | null { const lista = (asos || []).filter(a => a.tipo === tipo && dataValida(a.data_realizacao)); if (!lista.length) return null; return lista.sort((a, b) => new Date(b.data_realizacao).getTime() - new Date(a.data_realizacao).getTime())[0] }
 function getExamesPorTipo(exames: ExameCompl[], nomeExame: string): ExameCompl[] {
   return (exames || []).filter(e => e.nome_exame === nomeExame).sort((a, b) => new Date(b.data_realizacao).getTime() - new Date(a.data_realizacao).getTime())
 }
