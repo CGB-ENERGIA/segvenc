@@ -706,7 +706,7 @@ async function salvarAuditoriaNRPO(reg: RegistroNRPO, validado: boolean, obs: st
     else if (ordNRPO === 'realizado') { vA = a.data_realizacao; vB = b.data_realizacao }
     else if (ordNRPO === 'vencimento') { vA = a.data_vencimento; vB = b.data_vencimento }
     else if (ordNRPO === 'status') { vA = getStatusAuditoria(a.logs_auditoria); vB = getStatusAuditoria(b.logs_auditoria) }
-    return ordDirNRPO === 'asc' ? vA.localeCompare(vB) : vB.localeCompare(vA)
+    return ordDirNRPO === 'asc' ? (vA ?? '').localeCompare(vB ?? '') : (vB ?? '').localeCompare(vA ?? '')
   }), [filtradosNRPOCard, ordNRPO, ordDirNRPO])
 
   // ─── FILTROS + STATS ASO ──────────────────────────────────────────────────
@@ -737,8 +737,9 @@ async function salvarAuditoriaNRPO(reg: RegistroNRPO, validado: boolean, obs: st
     else if (ordASO === 'funcao') { vA = a.funcao || ''; vB = b.funcao || '' }
     else if (ordASO === 'tipo') { vA = a.tipo; vB = b.tipo }
     else if (ordASO === 'data_realizacao') { vA = a.data_realizacao; vB = b.data_realizacao }
+    else if (ordASO === 'data_vencimento') { vA = a.data_vencimento ?? ''; vB = b.data_vencimento ?? '' }
     else if (ordASO === 'status') { vA = getStatusAuditoria(a.logs_auditoria); vB = getStatusAuditoria(b.logs_auditoria) }
-    return ordDirASO === 'asc' ? vA.localeCompare(vB) : vB.localeCompare(vA)
+    return ordDirASO === 'asc' ? (vA ?? '').localeCompare(vB ?? '') : (vB ?? '').localeCompare(vA ?? '')
   }), [filtradosASOCard, ordASO, ordDirASO])
 
   function toggleOrdNRPO(c: string) { if (ordNRPO === c) setOrdDirNRPO(d => d === 'asc' ? 'desc' : 'asc'); else { setOrdNRPO(c); setOrdDirNRPO('asc') } }
